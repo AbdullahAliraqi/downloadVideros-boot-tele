@@ -54,3 +54,14 @@ def platform_for_url(url: str) -> str | None:
     if host == "reddit.com" or host.endswith(".reddit.com") or host == "redd.it" or host == "v.redd.it":
         return "Reddit"
     return None
+
+
+def is_reddit_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    if host.startswith("www."):
+        host = host[4:]
+    return (
+        host == "reddit.com"
+        or host.endswith(".reddit.com")
+        or host == "redd.it"
+    )
