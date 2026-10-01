@@ -16,6 +16,8 @@ from .download_engine import DownloadResult
 from .media_tools import FFmpegTools
 from .video_analyzer import TARGET_RESOLUTIONS
 
+import yt_dlp
+
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0 Safari/537.36"
@@ -27,6 +29,8 @@ class RedditVariant:
     height: int
     width: int | None
     url: str
+    format_id: str | None = None
+    has_audio: bool = False
 
 
 @dataclass(frozen=True)
@@ -35,6 +39,8 @@ class RedditResolvedVideo:
     duration_seconds: float | None
     variants: tuple[RedditVariant, ...]
     audio_url: str | None
+    source_url: str | None = None
+    audio_format_id: str | None = None
 
     @property
     def available_heights(self) -> tuple[int, ...]:
@@ -227,6 +233,104 @@ def _variant_from_fallback(url: str) -> RedditVariant | None:
     return RedditVariant(height=height, width=None, url=url)
 
 
+def _resolve_with_ytdlp(url: str) -> RedditResolvedVideo:
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": True,
+        "js_runtimes": {"node": {}},
+    }
+
+    with yt_dlp.YoutubeDL(options) as ydl:
+        info = ydl.extract_info(url, download=False)
+
+    variants_by_quality: dict[int, dict[str, Any]] = {}
+    best_audio_id: str | None = None
+    best_audio_score = (-1.0, -1.0)
+
+    for item in info.get("formats") or []:
+        format_id = item.get("format_id")
+        if not isinstance(format_id, str) or not format_id:
+            continue
+
+        vcodec = item.get("vcodec")
+        acodec = item.get("acodec")
+        has_video = bool(vcodec and vcodec != "none")
+        has_audio = bool(acodec and acodec != "none")
+
+        if not has_video and has_audio:
+            abr = item.get("abr")
+            tbr = item.get("tbr")
+            score = (
+                float(abr) if isinstance(abr, (int, float)) else 0.0,
+                float(tbr) if isinstance(tbr, (int, float)) else 0.0,
+            )
+            if score > best_audio_score:
+                best_audio_score = score
+                best_audio_id = format_id
+            continue
+
+        if not has_video:
+            continue
+
+        height = item.get("height")
+        width = item.get("width")
+        if not isinstance(height, int) or height <= 0:
+            continue
+        if not isinstance(width, int) or width <= 0:
+            width = None
+
+        quality = min(width, height) if width else height
+        if quality not in TARGET_RESOLUTIONS:
+            continue
+
+        tbr = item.get("tbr")
+        score = (
+            1 if has_audio else 0,
+            float(tbr) if isinstance(tbr, (int, float)) else 0.0,
+            width or 0,
+        )
+        current = variants_by_quality.get(quality)
+        if current is None or score > current["score"]:
+            variants_by_quality[quality] = {
+                "height": quality,
+                "width": width,
+                "url": item.get("url") or "",
+                "format_id": format_id,
+                "has_audio": has_audio,
+                "score": score,
+            }
+
+    variants = tuple(
+        RedditVariant(
+            height=item["height"],
+            width=item["width"],
+            url=item["url"],
+            format_id=item["format_id"],
+            has_audio=item["has_audio"],
+        )
+        for item in sorted(
+            variants_by_quality.values(),
+            key=lambda item: item["height"],
+            reverse=True,
+        )
+        if item["url"]
+    )
+    if not variants:
+        raise ValueError("No supported Reddit video resolution at 480p or higher")
+
+    duration = info.get("duration")
+    return RedditResolvedVideo(
+        title=str(info.get("title") or "Reddit video"),
+        duration_seconds=float(duration) if isinstance(duration, (int, float)) else None,
+        variants=variants,
+        audio_url=None,
+        source_url=url,
+        audio_format_id=best_audio_id,
+    )
+
+
 class RedditVideoResolver:
     """Resolve Reddit-hosted videos into exact 1080/720/480 variants."""
 
@@ -239,9 +343,14 @@ class RedditVideoResolver:
 
             html = ""
             if not dash_url or not fallback_url:
-                response = client.get(url)
-                response.raise_for_status()
-                html = response.text
+                try:
+                    response = client.get(url)
+                    response.raise_for_status()
+                    html = response.text
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code in {401, 403}:
+                        return _resolve_with_ytdlp(url)
+                    raise
 
             html_dash, html_variants, html_fallback = _extract_urls_from_html(html) if html else (None, [], None)
             dash_url = dash_url or html_dash
@@ -283,6 +392,7 @@ class RedditVideoResolver:
                 duration_seconds=duration,
                 variants=tuple(sorted(available, key=lambda item: item.height, reverse=True)),
                 audio_url=audio_url,
+                source_url=url,
             )
 
 
@@ -302,6 +412,54 @@ class RedditVideoDownloadEngine:
         if variant is None:
             raise ValueError(f"Reddit resolution {target_height}p is not available")
 
+        if resolved.source_url and variant.format_id:
+            root = Path(settings.download_root)
+            job_dir = root / job_id
+            if job_dir.exists():
+                import shutil
+                shutil.rmtree(job_dir)
+            job_dir.mkdir(parents=True, exist_ok=True)
+
+            selector = variant.format_id
+            if not variant.has_audio and resolved.audio_format_id:
+                selector = f"{variant.format_id}+{resolved.audio_format_id}"
+
+            options = {
+                "format": selector,
+                "outtmpl": str(job_dir / "%(id)s.%(ext)s"),
+                "merge_output_format": "mp4",
+                "ffmpeg_location": settings.ffmpeg_path,
+                "quiet": True,
+                "no_warnings": True,
+                "noplaylist": True,
+                "overwrites": True,
+                "js_runtimes": {"node": {}},
+            }
+            with yt_dlp.YoutubeDL(options) as ydl:
+                code = ydl.download([resolved.source_url])
+            if code not in (None, 0):
+                raise RuntimeError(f"yt-dlp Reddit download failed with code {code}")
+
+            candidates = [
+                path for path in job_dir.rglob("*")
+                if path.is_file() and path.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}
+            ]
+            if not candidates:
+                raise FileNotFoundError(f"No Reddit video file was produced in {job_dir}")
+
+            output = max(candidates, key=lambda path: path.stat().st_size)
+            probe = self.ffmpeg.probe(output)
+            max_size_bytes = settings.telegram_max_upload_mb * 1024 * 1024
+            return DownloadResult(
+                job_id=job_id,
+                file_path=output,
+                target_height=target_height,
+                selected_format=f"reddit:{selector}",
+                estimated_size=None,
+                actual_size=probe.size_bytes,
+                exceeds_planning_limit=probe.size_bytes > max_size_bytes,
+                probe=probe,
+            )
         root = Path(settings.download_root)
         job_dir = root / job_id
         if job_dir.exists():
