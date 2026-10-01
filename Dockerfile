@@ -1,8 +1,15 @@
 FROM python:3.14-slim-bookworm
 
-ENV PYTHONDONTWRITEBYTECODE=1     PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-RUN apt-get update     && apt-get install -y --no-install-recommends ffmpeg nodejs npm ca-certificates     && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=node:24-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+
+RUN node --version
 
 WORKDIR /app
 
@@ -13,7 +20,9 @@ COPY app ./app
 COPY tests ./tests
 COPY .env.example .env.example
 
-RUN useradd --create-home --uid 10001 appuser     && mkdir -p /data/downloads     && chown -R appuser:appuser /app /data/downloads
+RUN useradd --create-home --uid 10001 appuser \
+    && mkdir -p /data/downloads \
+    && chown -R appuser:appuser /app /data/downloads
 
 USER appuser
 
