@@ -13,8 +13,8 @@ class MediaProbeResult:
     path: Path
     size_bytes: int
     duration_seconds: float | None
-    width: int | None
-    height: int | None
+    width: int | None = None
+    height: int | None = None
 
 
 class FFmpegTools:
