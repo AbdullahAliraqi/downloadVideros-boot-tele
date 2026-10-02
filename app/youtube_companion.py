@@ -168,6 +168,9 @@ class YouTubeCompanionGateway:
         "initializing",
         "token generator",
         "po token",
+        "potoken",
+        "companion is starting",
+        "valid potoken",
     )
     _BLOCKED_MARKERS = (
         "sign in to confirm",
@@ -183,12 +186,12 @@ class YouTubeCompanionGateway:
         base_url: str | None = None,
         secret_key: str | None = None,
         timeout_seconds: float = 45.0,
-        readiness_retries: int = 3,
+        readiness_timeout_seconds: float = 90.0,
     ) -> None:
         self.base_url = (base_url or settings.youtube_companion_base_url).rstrip("/")
         self.secret_key = secret_key or settings.youtube_companion_secret_key
         self.timeout_seconds = timeout_seconds
-        self.readiness_retries = readiness_retries
+        self.readiness_timeout_seconds = readiness_timeout_seconds
 
     def _validate_config(self) -> None:
         if not self.base_url:
@@ -227,6 +230,7 @@ class YouTubeCompanionGateway:
 
     def _request_player(self, video_id: str) -> dict[str, object]:
         headers = self._headers()
+        deadline = time.monotonic() + self.readiness_timeout_seconds
         last_error: Exception | None = None
 
         with httpx.Client(
@@ -239,7 +243,7 @@ class YouTubeCompanionGateway:
             ),
             follow_redirects=True,
         ) as client:
-            for attempt in range(self.readiness_retries):
+            while True:
                 try:
                     response = client.post(
                         f"{self.base_url}/youtubei/v1/player",
@@ -247,12 +251,12 @@ class YouTubeCompanionGateway:
                     )
                 except httpx.RequestError as exc:
                     last_error = exc
-                    if attempt + 1 < self.readiness_retries:
-                        time.sleep(2 * (attempt + 1))
-                        continue
-                    raise YouTubeCompanionTransientError(
-                        f"Companion player request failed: {exc}"
-                    ) from exc
+                    if time.monotonic() >= deadline:
+                        raise YouTubeCompanionTransientError(
+                            f"Companion player request failed: {exc}"
+                        ) from exc
+                    time.sleep(2)
+                    continue
 
                 if response.status_code in {401, 403}:
                     raise YouTubeCompanionConfigurationError(
@@ -263,10 +267,10 @@ class YouTubeCompanionGateway:
                     last_error = RuntimeError(
                         f"Companion returned HTTP {response.status_code}"
                     )
-                    if attempt + 1 < self.readiness_retries:
-                        time.sleep(2 * (attempt + 1))
-                        continue
-                    raise YouTubeCompanionTransientError(str(last_error))
+                    if time.monotonic() >= deadline:
+                        raise YouTubeCompanionTransientError(str(last_error))
+                    time.sleep(3)
+                    continue
 
                 try:
                     response.raise_for_status()
@@ -277,7 +281,9 @@ class YouTubeCompanionGateway:
                     ) from exc
 
                 if not isinstance(payload, dict):
-                    raise YouTubeCompanionError("YouTube Companion returned invalid player JSON")
+                    raise YouTubeCompanionError(
+                        "YouTube Companion returned invalid player JSON"
+                    )
 
                 status, reason = self._playability_error(payload)
                 if status and status != "OK":
@@ -285,10 +291,10 @@ class YouTubeCompanionGateway:
                     lowered = detail.lower()
                     if any(marker in lowered for marker in self._NOT_READY_MARKERS):
                         last_error = YouTubeCompanionTransientError(detail)
-                        if attempt + 1 < self.readiness_retries:
-                            time.sleep(2 * (attempt + 1))
-                            continue
-                        raise last_error
+                        if time.monotonic() >= deadline:
+                            raise last_error
+                        time.sleep(3)
+                        continue
                     if any(marker in lowered for marker in self._BLOCKED_MARKERS):
                         raise YouTubeCompanionBlockedError(detail)
                     raise YouTubeCompanionError(detail)
