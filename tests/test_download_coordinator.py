@@ -170,3 +170,43 @@ def test_youtube_uses_piped_backend():
     assert outcome.result.target_height == 1080
     youtube_client.inspect.assert_called_once_with("https://www.youtube.com/watch?v=aqz-KE-bpKQ")
     youtube_client.download.assert_called_once()
+
+
+def test_youtube_provider_falls_back_to_alldl_when_piped_and_invidious_fail():
+    from unittest.mock import patch
+    from app.youtube_api import PipedYouTubeClient
+
+    coordinator = VideoDownloadCoordinator()
+    media = {
+        "title": "Fallback YouTube",
+        "qualities": [
+            {"quality": "1080p", "url": "https://media.example/1080.mp4"},
+            {"quality": "720p", "url": "https://media.example/720.mp4"},
+            {"quality": "480p", "url": "https://media.example/480.mp4"},
+        ],
+        "videoUrl": "https://media.example/best.mp4",
+    }
+
+    with (
+        patch.object(
+            coordinator.youtube_client,
+            "_get_payload",
+            side_effect=RuntimeError("Piped unavailable"),
+        ),
+        patch.object(
+            coordinator.youtube_client,
+            "_get_invidious_payload",
+            side_effect=RuntimeError("Invidious unavailable"),
+        ),
+        patch.object(
+            PipedYouTubeClient,
+            "_fetch_alldl_payload",
+            return_value=media,
+        ),
+    ):
+        info = coordinator.youtube_client.inspect(
+            "https://www.youtube.com/shorts/pOj_k8_svi8"
+        )
+
+    assert info.available_heights == (1080, 720, 480)
+    assert info.instance_url == "alldl:"
