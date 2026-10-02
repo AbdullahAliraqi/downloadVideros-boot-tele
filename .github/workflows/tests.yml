@@ -23,3 +23,130 @@ jobs:
           TELEGRAM_API_HASH: test-hash
           YOUTUBE_COMPANION_SECRET_KEY: A1b2C3d4E5f6G7h8
         run: docker compose config --quiet
+
+  youtube-companion-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BOT_TOKEN: test-token
+      TELEGRAM_API_ID: "123456"
+      TELEGRAM_API_HASH: test-hash
+      YOUTUBE_COMPANION_SECRET_KEY: A1b2C3d4E5f6G7h8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start YouTube Companion
+        run: docker compose up -d youtube-companion
+      - name: Wait for Companion and verify YouTube player + stream path
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 90); do
+            if docker run --rm --network container:telegram-video-youtube-companion curlimages/curl:latest -fsS http://127.0.0.1:8282/companion/healthz >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+
+          docker run --rm             --network container:telegram-video-youtube-companion             -e YOUTUBE_COMPANION_SECRET_KEY="$YOUTUBE_COMPANION_SECRET_KEY"             python:3.14-slim             python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          base = "http://127.0.0.1:8282/companion"
+          key = os.environ["YOUTUBE_COMPANION_SECRET_KEY"]
+          video_id = "aqz-KE-bpKQ"
+
+          request = urllib.request.Request(
+              f"{base}/youtubei/v1/player",
+              data=json.dumps({"videoId": video_id}).encode(),
+              headers={
+                  "Authorization": f"Bearer {key}",
+                  "Content-Type": "application/json",
+                  "Accept": "application/json",
+              },
+              method="POST",
+          )
+          with urllib.request.urlopen(request, timeout=60) as response:
+              payload = json.load(response)
+
+          playability = payload.get("playabilityStatus") or {}
+          if playability.get("status") != "OK":
+              raise SystemExit(
+                  f"Companion player rejected {video_id}: {playability!r}"
+              )
+
+          streaming = payload.get("streamingData") or {}
+          formats = (streaming.get("formats") or []) + (
+              streaming.get("adaptiveFormats") or []
+          )
+          candidates = [
+              item
+              for item in formats
+              if isinstance(item, dict)
+              and str(item.get("mimeType", "")).startswith("video/mp4")
+              and item.get("itag") is not None
+          ]
+          if not candidates:
+              raise SystemExit("Companion returned no MP4 video format")
+
+          candidates.sort(
+              key=lambda item: (
+                  int(item.get("height") or 0),
+                  int(item.get("bitrate") or 0),
+              ),
+              reverse=True,
+          )
+          selected = candidates[0]
+          itag = int(selected["itag"])
+          print(
+              json.dumps(
+                  {
+                      "video_id": video_id,
+                      "playability": playability.get("status"),
+                      "selected_itag": itag,
+                      "selected_height": selected.get("height"),
+                      "selected_mime": selected.get("mimeType"),
+                  }
+              )
+          )
+
+          stream_url = (
+              f"{base}/latest_version"
+              f"?id={video_id}&itag={itag}&local=true&title=smoke.mp4"
+          )
+          stream_request = urllib.request.Request(
+              stream_url,
+              headers={"Range": "bytes=0-16383"},
+          )
+          try:
+              with urllib.request.urlopen(stream_request, timeout=60) as response:
+                  status = response.status
+                  content_type = response.headers.get("Content-Type", "")
+                  sample = response.read(16384)
+          except urllib.error.HTTPError as exc:
+              raise SystemExit(
+                  f"Companion latest_version failed: HTTP {exc.code}"
+              ) from exc
+
+          if status not in (200, 206):
+              raise SystemExit(
+                  f"Unexpected Companion stream status: {status}"
+              )
+          if not sample:
+              raise SystemExit("Companion stream returned no bytes")
+          if "video" not in content_type and "application/octet-stream" not in content_type:
+              raise SystemExit(
+                  f"Unexpected Companion stream content type: {content_type!r}"
+              )
+          print(
+              json.dumps(
+                  {
+                      "latest_version_status": status,
+                      "content_type": content_type,
+                      "sample_bytes": len(sample),
+                  }
+              )
+          )
+          PY
+      - name: Stop YouTube Companion
+        if: always()
+        run: docker compose down -v
