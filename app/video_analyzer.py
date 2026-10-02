@@ -5,6 +5,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from yt_dlp import YoutubeDL
+from yt_dlp.networking.impersonate import ImpersonateTarget
 
 from .config import settings
 
@@ -106,7 +107,7 @@ class VideoMetadataAnalyzer:
         if settings.ytdlp_proxy_url:
             options["proxy"] = settings.ytdlp_proxy_url
         if is_youtube:
-            options["impersonate"] = "chrome"
+            options["impersonate"] = ImpersonateTarget("chrome")
             options["extractor_args"] = {
                 "youtube": {
                     "player_client": [
