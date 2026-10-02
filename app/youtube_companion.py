@@ -142,9 +142,14 @@ def _stream_from_raw(raw: object) -> YouTubeStream | None:
     if itag is None:
         return None
 
-    mime_type = str(raw.get("mimeType") or "").split(";", 1)[0].lower()
+    mime_type_raw = str(raw.get("mimeType") or "")
+    mime_type = mime_type_raw.split(";", 1)[0].lower()
     has_video = mime_type.startswith("video/")
-    has_audio = mime_type.startswith("audio/") or bool(raw.get("audioQuality"))
+    has_audio = (
+        mime_type.startswith("audio/")
+        or bool(raw.get("audioQuality"))
+        or "mp4a." in mime_type_raw.lower()
+    )
     if not has_video and not has_audio:
         return None
 
