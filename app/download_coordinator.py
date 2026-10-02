@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 from .download_engine import DownloadResult, VideoDownloadEngine
@@ -18,6 +19,8 @@ from .video_analyzer import (
     build_download_plan,
 )
 from .video_analyzer import VideoMetadataAnalyzer
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -158,8 +161,11 @@ class VideoDownloadCoordinator:
         if platform_for_url(url) == "YouTube":
             try:
                 return self._download_piped_youtube(url, job_id=job_id)
-            except PipedUnavailableError:
-                pass
+            except PipedUnavailableError as exc:
+                logger.warning(
+                    "Piped YouTube path unavailable; falling back to native yt-dlp: %s",
+                    exc,
+                )
 
         analysis = self.analyzer.analyze(url)
         supported_heights = available_resolutions(analysis)
