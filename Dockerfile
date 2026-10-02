@@ -4,12 +4,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=node:24-bookworm-slim /usr/local/bin/node /usr/local/bin/node
 
-RUN node --version
+RUN node --version \
+    && git clone --depth 1 --single-branch --branch 2.0.0 \
+        https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /opt/bgutil-ytdlp-pot-provider \
+    && cd /opt/bgutil-ytdlp-pot-provider/server \
+    && npm ci \
+    && npx tsc
 
 WORKDIR /app
 
@@ -28,4 +33,4 @@ USER appuser
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "node /opt/bgutil-ytdlp-pot-provider/server/build/main.js --port 4416 & exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
