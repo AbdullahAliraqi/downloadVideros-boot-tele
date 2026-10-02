@@ -83,7 +83,10 @@ class VideoMetadataAnalyzer:
             "skip_download": True,
             "noplaylist": True,
             "js_runtimes": {"node": {}},
-            "extractor_args": {"youtube": {"player_client": ["android"]}},
+            "extractor_args": {
+                "youtube": {"player_client": ["mweb"]},
+                "youtubepot-bgutilhttp": {"base_url": "http://127.0.0.1:4416"},
+            },
         }
         if ydl_opts:
             options.update(ydl_opts)
