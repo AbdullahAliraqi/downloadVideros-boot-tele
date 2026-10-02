@@ -34,7 +34,7 @@ def _quality_height(value: Any) -> int | None:
 
 
 def _size_bytes(item: dict[str, Any]) -> int | None:
-    for key in ("size_bytes", "filesize", "file_size_bytes", "size"):
+    for key in ("file_size", "size_bytes", "filesize", "file_size_bytes", "size"):
         value = item.get(key)
         if isinstance(value, int):
             return value
