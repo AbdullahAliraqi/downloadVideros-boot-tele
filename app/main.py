@@ -180,7 +180,7 @@ async def process_download_and_send(
             chat_id,
             f"❌ الفيديو ما زال يتجاوز {limit_mb} MB حتى بعد الوصول إلى أقل جودة مدعومة.",
         )
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "Video processing failed: chat_id=%s url=%s job_id=%s",
             chat_id,
@@ -190,6 +190,10 @@ async def process_download_and_send(
         await send_message(
             chat_id,
             "❌ فشلت عملية تنزيل أو معالجة الفيديو. راجع سجل الخادم لمعرفة السبب.",
+        )
+        await send_message(
+            chat_id,
+            f"🔧 DEBUG: {type(exc).__name__}: {exc}",
         )
     finally:
         if job_dir.exists():
