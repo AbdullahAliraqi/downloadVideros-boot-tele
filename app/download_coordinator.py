@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from .download_engine import DownloadResult, VideoDownloadEngine
 from .reddit_support import RedditVideoDownloadEngine, RedditVideoResolver
 from .config import settings
-from .youtube_api import TunelioYouTubeClient
+from .youtube_api import PipedYouTubeClient
 from .url_validator import is_reddit_url
 from .video_analyzer import (
     DownloadPlan,
@@ -44,7 +44,7 @@ class VideoDownloadCoordinator:
         self.reddit_resolver = reddit_resolver or RedditVideoResolver()
         self.reddit_downloader = reddit_downloader or RedditVideoDownloadEngine()
         self.max_size_bytes = max_size_bytes
-        self.youtube_client = TunelioYouTubeClient()
+        self.youtube_client = PipedYouTubeClient()
 
     @staticmethod
     def _lower_targets(current_height: int, available: tuple[int, ...]) -> tuple[int, ...]:
@@ -159,7 +159,7 @@ class VideoDownloadCoordinator:
         if is_reddit_url(url):
             return self._download_reddit(url, job_id=job_id)
 
-        if self._is_youtube_url(url) and settings.tunelio_api_key:
+        if self._is_youtube_url(url):
             return self._download_youtube(url, job_id=job_id)
 
         analysis = self.analyzer.analyze(url)
