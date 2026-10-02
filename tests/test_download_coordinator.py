@@ -1,6 +1,6 @@
 from unittest.mock import Mock
 
-from app.alldl_support import AllDLMedia, AllDLQuality
+from app.alldl_support import AllDLMedia, AllDLQuality, AllDLUnavailableError
 from app.download_coordinator import VideoDownloadCoordinator
 from app.download_engine import DownloadResult
 from app.media_tools import MediaProbeResult
@@ -123,7 +123,7 @@ def test_alldl_path_is_used_for_instagram():
 
 def test_alldl_failure_falls_back_to_native_pipeline():
     resolver = Mock()
-    resolver.resolve.side_effect = RuntimeError("api failed")
+    resolver.resolve.side_effect = AllDLUnavailableError("api failed")
     native_analyzer = Mock()
     native_analyzer.analyze.return_value = base_analysis()
     native_downloader = Mock()
