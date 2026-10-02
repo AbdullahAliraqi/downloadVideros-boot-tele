@@ -44,6 +44,8 @@ class Settings:
     telegram_local_mode: bool
     telegram_max_upload_mb: int
     ytdlp_proxy_url: str
+    youtube_proxy_url: str
+    youtube_ipv6_block: str
     ytdlp_cookies_file: str
     piped_api_urls: tuple[str, ...]
     youtube_companion_base_url: str
@@ -67,6 +69,8 @@ settings = Settings(
     telegram_local_mode=_bool_env("TELEGRAM_LOCAL_MODE", False),
     telegram_max_upload_mb=_int_env("TELEGRAM_MAX_UPLOAD_MB", 50),
     ytdlp_proxy_url=os.getenv("YTDLP_PROXY_URL", "").strip(),
+    youtube_proxy_url=os.getenv("YOUTUBE_PROXY_URL", "").strip() or os.getenv("YTDLP_PROXY_URL", "").strip(),
+    youtube_ipv6_block=os.getenv("YOUTUBE_IPV6_BLOCK", "").strip(),
     ytdlp_cookies_file=os.getenv("YTDLP_COOKIES_FILE", "").strip(),
     piped_api_urls=_csv_env("PIPED_API_URLS"),
     youtube_companion_base_url=os.getenv(
