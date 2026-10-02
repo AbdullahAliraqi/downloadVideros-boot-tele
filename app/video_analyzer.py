@@ -98,6 +98,10 @@ class VideoMetadataAnalyzer:
         options = dict(self._ydl_opts)
         if settings.ytdlp_proxy_url:
             options["proxy"] = settings.ytdlp_proxy_url
+        if settings.ytdlp_cookies_file:
+            host = (urlparse(url).hostname or "").lower().rstrip(".")
+            if host == "youtube.com" or host.endswith(".youtube.com") or host == "youtu.be":
+                options["cookiefile"] = settings.ytdlp_cookies_file
 
         with yt_dlp.YoutubeDL(options) as ydl:
             info = ydl.extract_info(url, download=False)
