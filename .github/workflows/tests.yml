@@ -16,3 +16,10 @@ jobs:
           python-version: "3.14"
       - run: pip install -r requirements.txt
       - run: pytest -q
+      - name: Validate Docker Compose
+        env:
+          BOT_TOKEN: test-token
+          TELEGRAM_API_ID: "123456"
+          TELEGRAM_API_HASH: test-hash
+          YOUTUBE_COMPANION_SECRET_KEY: A1b2C3d4E5f6G7h8
+        run: docker compose config --quiet

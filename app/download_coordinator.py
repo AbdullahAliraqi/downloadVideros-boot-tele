@@ -15,7 +15,11 @@ from .video_analyzer import (
     build_download_plan,
 )
 from .video_analyzer import VideoMetadataAnalyzer
-from .youtube_companion import YouTubeCompanionGateway, YouTubeCompanionError
+from .youtube_companion import (
+    YouTubeCompanionConfigurationError,
+    YouTubeCompanionError,
+    YouTubeCompanionGateway,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +196,8 @@ class VideoDownloadCoordinator:
         if platform_for_url(url) == "YouTube":
             try:
                 return self._download_youtube_companion(url, job_id=job_id)
+            except YouTubeCompanionConfigurationError:
+                raise
             except YouTubeCompanionError as exc:
                 logger.warning(
                     "YouTube Companion path failed; trying native yt-dlp once: %s",
