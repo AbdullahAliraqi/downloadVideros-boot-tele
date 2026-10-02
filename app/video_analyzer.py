@@ -96,15 +96,8 @@ class VideoMetadataAnalyzer:
 
     def analyze(self, url: str) -> dict[str, Any]:
         options = dict(self._ydl_opts)
-        host = (urlparse(url).hostname or "").lower()
-        is_youtube = (
-            host == "youtube.com"
-            or host.endswith(".youtube.com")
-            or host == "youtu.be"
-        )
         if settings.ytdlp_proxy_url:
             options["proxy"] = settings.ytdlp_proxy_url
-        if is_youtube:
 
         with yt_dlp.YoutubeDL(options) as ydl:
             info = ydl.extract_info(url, download=False)
