@@ -35,7 +35,7 @@ YouTube no longer depends on public Piped instances.
 
 The primary YouTube path is the official Invidious Companion project, an internal service specifically designed to handle YouTube stream retrieval and attestation through youtubei.js. It exposes an internal player API and a refreshed `latest_version` stream path. The bot only uses Companion as a YouTube acquisition layer; resolution policy, file-size policy, FFmpeg probing, and Telegram delivery remain in this project.
 
-The bot falls back to native yt-dlp once if Companion is unavailable or YouTube rejects the Companion path. Native yt-dlp can optionally use a Netscape-format YouTube cookies file and the same configured egress proxy.
+The bot falls back to native yt-dlp once if Companion is unavailable or YouTube rejects the Companion path. A configuration error in the internal Companion key is not silently hidden by the fallback. Native yt-dlp can optionally use a Netscape-format YouTube cookies file and the same configured egress proxy.
 
 The Companion service generates PO tokens automatically. It keeps its youtube.js cache in a persistent Docker volume and refreshes its YouTube session periodically.
 
@@ -52,12 +52,14 @@ For native fallback cookies:
 
 yt-dlp requires Mozilla/Netscape cookie format for a manual cookie file. Its current FAQ also recommends refreshing the browser session and notes that cookies are sensitive credentials. Use a dedicated account rather than a primary account when account cookies are necessary.
 
-If a proxy is required, set `YTDLP_PROXY_URL`. The same value is passed to both native yt-dlp and YouTube Companion so the two paths use the same egress identity. Do not use per-request rotating proxies for a persistent YouTube session.
+For the current YouTube bot-check problem, the decisive deployment dependency is the outbound network identity. Invidious documents that YouTube may block datacenter/VPN IPs and recommends changing the public IP, configuring a proxy in Companion, or using IPv6 rotation; it explicitly does not guarantee that these measures will restore access. Set `YOUTUBE_PROXY_URL` to a stable proxy when the VPS public IP is blocked. `YOUTUBE_IPV6_BLOCK` is an alternative when the VPS has a routable IPv6 range. Do not rotate a proxy identity per request.
+
+`YTDLP_PROXY_URL` remains the generic native yt-dlp proxy. For YouTube, `YOUTUBE_PROXY_URL` takes precedence.
 
 ## Local / VPS deployment
 
 1. Copy `.env.example` to `.env`.
-2. Set `BOT_TOKEN`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, and a 16-character `YOUTUBE_COMPANION_SECRET_KEY`.
+2. Set `BOT_TOKEN`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, and a 16-character `YOUTUBE_COMPANION_SECRET_KEY`. For the observed YouTube bot-check on datacenter IPs, also configure `YOUTUBE_PROXY_URL` or a valid `YOUTUBE_IPV6_BLOCK`.
 3. Run:
 
 ```bash
@@ -65,7 +67,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-The bot service uses `app.local_runner`, removes any webhook, and polls the Local Telegram Bot API.
+The bot service uses `app.local_runner`, removes any webhook, and polls the Local Telegram Bot API. The Compose deployment must be used as a multi-service project; deploying the root Dockerfile alone does not start the Local Telegram Bot API or YouTube Companion services.
 
 For the 2000 MB target, do not replace `TELEGRAM_API_BASE_URL=http://telegram-bot-api:8081` with the cloud Bot API URL.
 
