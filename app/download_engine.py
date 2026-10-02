@@ -5,7 +5,6 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import yt_dlp
-from yt_dlp.networking.impersonate import ImpersonateTarget
 
 from .config import settings
 from .media_tools import FFmpegTools, MediaProbeResult
@@ -74,7 +73,7 @@ class VideoDownloadEngine:
         if settings.ytdlp_proxy_url:
             options["proxy"] = settings.ytdlp_proxy_url
         if is_youtube:
-            options["impersonate"] = ImpersonateTarget("chrome")
+            options["impersonate"] = yt_dlp.networking.impersonate.ImpersonateTarget.from_str("chrome")
             options["extractor_args"] = {
                 "youtube": {
                     "player_client": [
