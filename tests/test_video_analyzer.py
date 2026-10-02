@@ -198,7 +198,7 @@ def test_analyzer_uses_youtube_fallback_clients():
             "tv",
             "web_safari",
         ]
-        assert opts["impersonate"].name == "chrome"
+        assert opts["impersonate"].client == "chrome"
 
 
 
