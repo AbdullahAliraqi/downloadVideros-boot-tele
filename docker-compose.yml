@@ -40,7 +40,8 @@ services:
       NETWORKING_FETCH_RETRY_TIMES: "2"
       NETWORKING_FETCH_RETRY_INITIAL_DEBOUNCE: "500"
       NETWORKING_FETCH_RETRY_DEBOUNCE_MULTIPLIER: "2"
-      PROXY: ${YTDLP_PROXY_URL:-}
+      PROXY: ${YOUTUBE_PROXY_URL:-}
+      NETWORKING_IPV6_BLOCK: ${YOUTUBE_IPV6_BLOCK:-}
     volumes:
       - youtube_companion_cache:/var/tmp/youtubei.js
     expose:
@@ -56,8 +57,6 @@ services:
     depends_on:
       telegram-bot-api:
         condition: service_healthy
-      youtube-companion:
-        condition: service_healthy
     environment:
       BOT_TOKEN: ${BOT_TOKEN:?Set BOT_TOKEN in .env}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
@@ -69,9 +68,11 @@ services:
       FFPROBE_PATH: ffprobe
       DOWNLOAD_ROOT: /data/downloads
       YTDLP_PROXY_URL: ${YTDLP_PROXY_URL:-}
+      YOUTUBE_PROXY_URL: ${YOUTUBE_PROXY_URL:-}
+      YOUTUBE_IPV6_BLOCK: ${YOUTUBE_IPV6_BLOCK:-}
       YTDLP_COOKIES_FILE: ${YTDLP_COOKIES_FILE:-}
       YOUTUBE_COMPANION_BASE_URL: http://youtube-companion:8282/companion
-      YOUTUBE_COMPANION_SECRET_KEY: ${YOUTUBE_COMPANION_SECRET_KEY:?Set YOUTUBE_COMPANION_SECRET_KEY (exactly 16 chars) in .env}
+      YOUTUBE_COMPANION_SECRET_KEY: ${YOUTUBE_COMPANION_SECRET_KEY:-}
     volumes:
       - telegram_bot_downloads:/data/downloads
       - ${YTDLP_COOKIES_DIR:-./.secrets}:/run/secrets:ro
