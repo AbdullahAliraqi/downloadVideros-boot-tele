@@ -20,11 +20,10 @@ USER_AGENT = (
     "Chrome/154.0 Safari/537.36"
 )
 
-DEFAULT_PIPED_API_URLS = (
-    "https://pipedapi.kavin.rocks",
-    "https://pipedapi.leptons.xyz",
-    "https://pipedapi.nosebs.ru",
-)
+# Public Piped instances are not an implicit production dependency.
+# Configure PIPED_API_URLS only with an instance that has been verified
+# from the actual deployment environment.
+DEFAULT_PIPED_API_URLS: tuple[str, ...] = ()
 
 
 class PipedUnavailableError(RuntimeError):
@@ -157,6 +156,7 @@ class PipedYoutubeResolver:
             "Accept": "application/json",
         }
         last_error: Exception | None = None
+        errors: list[str] = []
 
         with httpx.Client(
             headers=headers,
@@ -221,9 +221,11 @@ class PipedYoutubeResolver:
                     return resolved
                 except Exception as exc:
                     last_error = exc
+                    errors.append(f"{base_url}: {type(exc).__name__}: {exc}")
 
+        detail = "; ".join(errors) if errors else "no Piped API instances configured"
         raise PipedUnavailableError(
-            f"All Piped instances failed for YouTube video {video_id}"
+            f"All configured Piped instances failed for YouTube video {video_id}: {detail}"
         ) from last_error
 
 
