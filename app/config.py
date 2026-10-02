@@ -44,6 +44,7 @@ class Settings:
     telegram_local_mode: bool
     telegram_max_upload_mb: int
     ytdlp_proxy_url: str
+    ytdlp_cookies_file: str
     piped_api_urls: tuple[str, ...]
     ffmpeg_path: str
     ffprobe_path: str
@@ -67,6 +68,7 @@ settings = Settings(
     telegram_local_mode=_bool_env("TELEGRAM_LOCAL_MODE", False),
     telegram_max_upload_mb=_int_env("TELEGRAM_MAX_UPLOAD_MB", 50),
     ytdlp_proxy_url=os.getenv("YTDLP_PROXY_URL", "").strip(),
+    ytdlp_cookies_file=os.getenv("YTDLP_COOKIES_FILE", "").strip(),
     piped_api_urls=_csv_env("PIPED_API_URLS"),
     ffmpeg_path=os.getenv("FFMPEG_PATH", "ffmpeg").strip() or "ffmpeg",
     ffprobe_path=os.getenv("FFPROBE_PATH", "ffprobe").strip() or "ffprobe",
