@@ -46,6 +46,8 @@ class Settings:
     ytdlp_proxy_url: str
     ytdlp_cookies_file: str
     piped_api_urls: tuple[str, ...]
+    youtube_companion_base_url: str
+    youtube_companion_secret_key: str
     ffmpeg_path: str
     ffprobe_path: str
     download_root: str
@@ -60,22 +62,24 @@ settings = Settings(
     telegram_api_id=os.getenv("TELEGRAM_API_ID", "").strip(),
     telegram_api_hash=os.getenv("TELEGRAM_API_HASH", "").strip(),
     telegram_api_base_url=_normalize_api_base_url(
-        os.getenv(
-            "TELEGRAM_API_BASE_URL",
-            "https://api.telegram.org",
-        )
+        os.getenv("TELEGRAM_API_BASE_URL", "https://api.telegram.org")
     ),
     telegram_local_mode=_bool_env("TELEGRAM_LOCAL_MODE", False),
     telegram_max_upload_mb=_int_env("TELEGRAM_MAX_UPLOAD_MB", 50),
     ytdlp_proxy_url=os.getenv("YTDLP_PROXY_URL", "").strip(),
     ytdlp_cookies_file=os.getenv("YTDLP_COOKIES_FILE", "").strip(),
     piped_api_urls=_csv_env("PIPED_API_URLS"),
+    youtube_companion_base_url=os.getenv(
+        "YOUTUBE_COMPANION_BASE_URL",
+        "http://youtube-companion:8282/companion",
+    ).strip(),
+    youtube_companion_secret_key=os.getenv(
+        "YOUTUBE_COMPANION_SECRET_KEY",
+        "",
+    ).strip(),
     ffmpeg_path=os.getenv("FFMPEG_PATH", "ffmpeg").strip() or "ffmpeg",
     ffprobe_path=os.getenv("FFPROBE_PATH", "ffprobe").strip() or "ffprobe",
-    download_root=os.getenv(
-        "DOWNLOAD_ROOT",
-        "/tmp/telegram-video-downloads",
-    ).strip(),
+    download_root=os.getenv("DOWNLOAD_ROOT", "/tmp/telegram-video-downloads").strip(),
     webhook_base_url=os.getenv("WEBHOOK_BASE_URL", "").strip(),
     webhook_secret=os.getenv("WEBHOOK_SECRET", "").strip(),
     host=os.getenv("HOST", "0.0.0.0").strip() or "0.0.0.0",

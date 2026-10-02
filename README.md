@@ -8,58 +8,83 @@ The bot checks source-supported resolutions before downloading and prefers 1080p
 
 Portrait video quality is classified by the shorter video dimension, so 1080x1920 is treated as 1080p.
 
-## Local / VPS deployment
+## Production architecture
 
-The production deployment is Docker Compose with the Local Telegram Bot API. Both the Bot API state and downloaded media use Docker named volumes; this avoids the Windows bind-mount failure that previously caused Telegram Bot API binlog crashes.
+The production deployment is Docker Compose on the VPS with three cooperating services:
+
+```text
+Telegram
+   ↓
+bot
+   ├── YouTube → youtube-companion → YouTube
+   ├── Reddit  → Reddit resolver/downloader
+   └── other supported platforms → native yt-dlp
+   ↓
+FFprobe / actual-size gate
+   ↓
+telegram-bot-api (Local Bot API)
+   ↓
+Telegram
+```
+
+The Local Telegram Bot API is the upload path for the 2000 MB target.
 
 ### YouTube production path
 
-YouTube uses native yt-dlp by default. Public Piped is optional and is used only when `PIPED_API_URLS` contains an instance that has been independently verified from the deployment environment.
+YouTube no longer depends on public Piped instances.
 
-When YouTube returns `Sign in to confirm you’re not a bot`, set `YTDLP_COOKIES_FILE` to a Netscape-format YouTube cookies file. yt-dlp documents cookies as a workaround for YouTube bot verification/authentication. Keep the file out of Git history; yt-dlp also warns that using an account can result in temporary or permanent account bans, so a dedicated account is preferable.
+The primary YouTube path is the official Invidious Companion project, an internal service specifically designed to handle YouTube stream retrieval and attestation through youtubei.js. It exposes an internal player API and a refreshed `latest_version` stream path. The bot only uses Companion as a YouTube acquisition layer; resolution policy, file-size policy, FFmpeg probing, and Telegram delivery remain in this project.
+
+The bot falls back to native yt-dlp once if Companion is unavailable or YouTube rejects the Companion path. Native yt-dlp can optionally use a Netscape-format YouTube cookies file and the same configured egress proxy.
+
+The Companion service generates PO tokens automatically. It keeps its youtube.js cache in a persistent Docker volume and refreshes its YouTube session periodically.
+
+### YouTube configuration
+
+Set `YOUTUBE_COMPANION_SECRET_KEY` to a random value of exactly 16 characters in the VPS `.env`. It is used only for the internal bot → Companion API.
+
+For native fallback cookies:
+
+1. Create a `.secrets` directory beside `docker-compose.yml`.
+2. Put `youtube-cookies.txt` inside it.
+3. Set `YTDLP_COOKIES_FILE=/run/secrets/youtube-cookies.txt`.
+4. Keep the cookie file out of Git.
+
+yt-dlp requires Mozilla/Netscape cookie format for a manual cookie file. Its current FAQ also recommends refreshing the browser session and notes that cookies are sensitive credentials. Use a dedicated account rather than a primary account when account cookies are necessary.
+
+If a proxy is required, set `YTDLP_PROXY_URL`. The same value is passed to both native yt-dlp and YouTube Companion so the two paths use the same egress identity. Do not use per-request rotating proxies for a persistent YouTube session.
+
+## Local / VPS deployment
 
 1. Copy `.env.example` to `.env`.
-2. Put your real Telegram credentials in `.env`. Never commit it.
+2. Set `BOT_TOKEN`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, and a 16-character `YOUTUBE_COMPANION_SECRET_KEY`.
 3. Run:
 
 ```bash
-docker compose build
-docker compose up -d
+docker compose up -d --build
+docker compose ps
 ```
 
-The bot starts its Telegram long-polling runner automatically and removes any webhook before polling.
+The bot service uses `app.local_runner`, removes any webhook, and polls the Local Telegram Bot API.
 
-## Moving the project to a VPS
+For the 2000 MB target, do not replace `TELEGRAM_API_BASE_URL=http://telegram-bot-api:8081` with the cloud Bot API URL.
 
-Clone this repository on the VPS, create the VPS `.env`, then run the same Docker Compose commands above.
+## Verification
 
-For the 2000 MB upload target, use the Local Telegram Bot API deployment in `docker-compose.yml`. The Render configuration is a separate hosted-Bot-API mode and is not the 2000 MB production path.
+A successful `/health` or `200 OK` webhook response is not a YouTube success signal.
+
+For a real production gate, verify all of the following on the deployed Compose project:
+
+- `youtube-companion` is healthy.
+- Its player endpoint resolves a public YouTube video.
+- The bot downloads the highest source-supported resolution.
+- FFprobe validates the resulting MP4.
+- A file over 2000 MB causes only the documented resolution fallback.
+- A file within the limit reaches `telegram-bot-api` and is sent.
+- Restarting the Compose project preserves the Companion cache volume and does not require rebuilding for ordinary session refreshes.
 
 ## Security
 
-Real values for `BOT_TOKEN`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, and `WEBHOOK_SECRET` must stay out of Git history.
+Real values for `BOT_TOKEN`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `WEBHOOK_SECRET`, `YOUTUBE_COMPANION_SECRET_KEY`, and YouTube cookies must stay out of Git history.
 
-
-## Blitz Telegram upload path
-
-Telegram's cloud Bot API is limited to 50 MB for bot uploads. Telegram's Local Bot API server allows uploads up to 2000 MB and requires your own `api_id` and `api_hash`.
-
-This repository already contains the Local Bot API service in `docker-compose.yml`. On blitz.cloud, deploy the repository as a GitHub/Compose project rather than deploying only the root `Dockerfile`.
-
-Blitz can run the services in a Compose project as separate parts while keeping their service-to-service addresses. The `bot` service uses `app.local_runner` and talks to the `telegram-bot-api` service at `http://telegram-bot-api:8081`. The Compose file already enables `TELEGRAM_LOCAL=1` and sets the upload target to 2000 MB.
-
-Set these environment variables in the Blitz project:
-
-```
-BOT_TOKEN=<your existing bot token>
-TELEGRAM_API_ID=<your Telegram api_id>
-TELEGRAM_API_HASH=<your Telegram api_hash>
-```
-
-Do not set `TELEGRAM_API_BASE_URL=https://api.telegram.org` for the Compose deployment; the Compose service sets it internally to `http://telegram-bot-api:8081`.
-
-Obtain `api_id` and `api_hash` from https://my.telegram.org. They are separate from the bot token.
-
-After the Compose deployment is online, verify the `telegram-bot-api` part is healthy and the `bot` part is running. Then the bot uses Telegram Local Bot API for files up to the 2000 MB target.
-
-The 50 MB cloud limit is a Telegram platform limit, not a Blitz limit.
+The Local Telegram Bot API state, downloads, and Companion cache use named Docker volumes so service restarts do not depend on bind-mounted runtime state.
