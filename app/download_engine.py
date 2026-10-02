@@ -8,6 +8,7 @@ import yt_dlp
 
 from .config import settings
 from .media_tools import FFmpegTools, MediaProbeResult
+from .url_validator import platform_for_url
 from .video_analyzer import DownloadPlan
 
 
@@ -65,6 +66,8 @@ class VideoDownloadEngine:
 
         if settings.ytdlp_proxy_url:
             options["proxy"] = settings.ytdlp_proxy_url
+        if settings.ytdlp_cookies_file and platform_for_url(url) == "YouTube":
+            options["cookiefile"] = settings.ytdlp_cookies_file
 
         with yt_dlp.YoutubeDL(options) as ydl:
             result_code = ydl.download([url])
