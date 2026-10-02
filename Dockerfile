@@ -7,10 +7,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=node:24-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:24-bookworm-slim /usr/local/ /usr/local/
 
 RUN node --version \
-    && git clone --depth 1 --single-branch --branch 2.0.0 \
+    && git clone --depth 1 --single-branch --branch 2.0.1 \
         https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /opt/bgutil-ytdlp-pot-provider \
     && cd /opt/bgutil-ytdlp-pot-provider/server \
     && npm ci \
