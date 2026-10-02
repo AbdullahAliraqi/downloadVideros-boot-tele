@@ -3,4 +3,5 @@ httpx>=0.28,<1
 uvicorn[standard]>=0.34,<1
 yt-dlp>=2026.8
 yt-dlp-ejs>=0.8
+bgutil-ytdlp-pot-provider==2.0.0
 pytest>=8,<9
