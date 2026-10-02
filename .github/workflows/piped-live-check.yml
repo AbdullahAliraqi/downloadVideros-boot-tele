@@ -11,9 +11,16 @@ jobs:
       fail-fast: false
       matrix:
         instance:
-          - https://pipedapi.kavin.rocks
-          - https://pipedapi.leptons.xyz
-          - https://pipedapi.nosebs.ru
+          - https://pipedapi.tokhmi.xyz
+          - https://pipedapi.moomoo.me
+          - https://pipedapi.syncpundit.io
+          - https://api-piped.mha.fi
+          - https://piped-api.garudalinux.org
+          - https://pipedapi.rivo.lol
+          - https://piped-api.privacy.com.de
+          - https://pipedapi.adminforge.de
+          - https://api.piped.yt
+          - https://pipedapi.drgns.space
     steps:
       - name: Query Piped streams endpoint
         env:
