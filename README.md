@@ -14,9 +14,9 @@ The production deployment is Docker Compose with the Local Telegram Bot API. Bot
 
 ### YouTube production path
 
-YouTube is attempted through Piped first. The bot resolves the YouTube video through a documented public Piped API instance and downloads the returned MP4 stream, so the initial YouTube extraction request does not originate from the Blitz IP. The resolver tries multiple instances in sequence. The native yt-dlp pipeline remains the final fallback.
+YouTube uses native yt-dlp by default. Public Piped is optional and is used only when `PIPED_API_URLS` contains an instance that has been independently verified from the deployment environment.
 
-The public Piped instance list can change, so `PIPED_API_URLS` is configurable. Leave it empty to use the current documented defaults, or provide a comma-separated list of known instances.
+When YouTube returns `Sign in to confirm you’re not a bot`, set `YTDLP_COOKIES_FILE` to a Netscape-format YouTube cookies file. yt-dlp documents cookies as a workaround for YouTube bot verification/authentication. Keep the file out of Git history; yt-dlp also warns that using an account can result in temporary or permanent account bans, so a dedicated account is preferable.
 
 1. Copy `.env.example` to `.env`.
 2. Put your real Telegram credentials in `.env`. Never commit it.
