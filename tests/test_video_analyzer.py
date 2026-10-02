@@ -203,6 +203,28 @@ def test_analyzer_uses_configured_youtube_cookies():
         assert opts["cookiefile"] == "/run/secrets/youtube-cookies.txt"
 
 
+def test_analyzer_prefers_youtube_specific_proxy():
+    fake_info = {
+        "id": "abc",
+        "title": "Example",
+        "duration": 12,
+        "formats": [],
+    }
+
+    from app.video_analyzer import VideoMetadataAnalyzer
+
+    with patch.object(settings, "youtube_proxy_url", "socks5://youtube-proxy"),          patch.object(settings, "ytdlp_proxy_url", "http://generic-proxy"),          patch("app.video_analyzer.yt_dlp.YoutubeDL") as ydl_cls:
+        ydl = ydl_cls.return_value.__enter__.return_value
+        ydl.extract_info.return_value = fake_info
+
+        VideoMetadataAnalyzer().analyze(
+            "https://www.youtube.com/watch?v=abc"
+        )
+
+        opts = ydl_cls.call_args.args[0]
+        assert opts["proxy"] == "socks5://youtube-proxy"
+
+
 def test_analyzer_uses_yt_dlp_default_youtube_clients():
     fake_info = {
         "id": "abc",

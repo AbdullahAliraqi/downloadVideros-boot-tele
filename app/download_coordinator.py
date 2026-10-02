@@ -3,14 +3,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Any
+
 from .download_engine import DownloadResult, VideoDownloadEngine
-from .piped_youtube import (
-    PipedUnavailableError,
-    PipedYoutubeDownloadEngine,
-    PipedYoutubeResolver,
-)
 from .reddit_support import RedditVideoDownloadEngine, RedditVideoResolver
-from .url_validator import is_reddit_url
+from .url_validator import is_reddit_url, platform_for_url
 from .video_analyzer import (
     DownloadPlan,
     MAX_PLANNING_SIZE_BYTES,
@@ -19,6 +15,11 @@ from .video_analyzer import (
     build_download_plan,
 )
 from .video_analyzer import VideoMetadataAnalyzer
+from .youtube_companion import (
+    YouTubeCompanionConfigurationError,
+    YouTubeCompanionError,
+    YouTubeCompanionGateway,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,27 +40,21 @@ class VideoDownloadCoordinator:
         *,
         analyzer: VideoMetadataAnalyzer | None = None,
         downloader: VideoDownloadEngine | None = None,
-        piped_resolver: PipedYoutubeResolver | None = None,
-        piped_downloader: PipedYoutubeDownloadEngine | None = None,
+        youtube_gateway: YouTubeCompanionGateway | None = None,
         reddit_resolver: RedditVideoResolver | None = None,
         reddit_downloader: RedditVideoDownloadEngine | None = None,
         max_size_bytes: int = MAX_PLANNING_SIZE_BYTES,
     ) -> None:
         self.analyzer = analyzer or VideoMetadataAnalyzer()
         self.downloader = downloader or VideoDownloadEngine()
-        self.piped_resolver = piped_resolver or PipedYoutubeResolver()
-        self.piped_downloader = piped_downloader or PipedYoutubeDownloadEngine()
+        self.youtube_gateway = youtube_gateway or YouTubeCompanionGateway()
         self.reddit_resolver = reddit_resolver or RedditVideoResolver()
         self.reddit_downloader = reddit_downloader or RedditVideoDownloadEngine()
         self.max_size_bytes = max_size_bytes
 
     @staticmethod
     def _lower_targets(current_height: int, available: tuple[int, ...]) -> tuple[int, ...]:
-        return tuple(
-            height
-            for height in available
-            if height < current_height
-        )
+        return tuple(height for height in available if height < current_height)
 
     def _next_plan(
         self,
@@ -84,8 +79,7 @@ class VideoDownloadCoordinator:
 
         attempts: list[int] = []
         current_height = next(
-            height for height in TARGET_RESOLUTIONS
-            if height in supported_heights
+            height for height in TARGET_RESOLUTIONS if height in supported_heights
         )
 
         while True:
@@ -105,9 +99,7 @@ class VideoDownloadCoordinator:
                 )
 
             next_heights = tuple(
-                height
-                for height in supported_heights
-                if height < current_height
+                height for height in supported_heights if height < current_height
             )
             if not next_heights:
                 return DownloadOutcome(
@@ -119,21 +111,25 @@ class VideoDownloadCoordinator:
 
             current_height = next_heights[0]
 
-    def _download_piped_youtube(self, url: str, *, job_id: str) -> DownloadOutcome:
-        resolved = self.piped_resolver.resolve(url)
+    def _download_youtube_companion(self, url: str, *, job_id: str) -> DownloadOutcome:
+        resolved = self.youtube_gateway.resolve(url)
         supported_heights = resolved.available_heights
         if not supported_heights:
-            raise PipedUnavailableError("No supported Piped YouTube resolution")
+            raise YouTubeCompanionError(
+                "YouTube Companion returned no downloadable 1080p/720p/480p MP4 resolution"
+            )
 
         attempts: list[int] = []
         current_height = supported_heights[0]
+
         while True:
             attempts.append(current_height)
-            result = self.piped_downloader.download(
+            result = self.youtube_gateway.download(
                 resolved,
                 current_height,
                 job_id=job_id,
             )
+
             if result.actual_size <= self.max_size_bytes:
                 return DownloadOutcome(
                     result=result,
@@ -150,29 +146,15 @@ class VideoDownloadCoordinator:
                     fallback_count=len(attempts) - 1,
                     available_heights=supported_heights,
                 )
+
             current_height = next_heights[0]
 
-    def download(self, url: str, *, job_id: str) -> DownloadOutcome:
-        if is_reddit_url(url):
-            return self._download_reddit(url, job_id=job_id)
-
-        from .url_validator import platform_for_url
-
-        if platform_for_url(url) == "YouTube":
-            try:
-                return self._download_piped_youtube(url, job_id=job_id)
-            except PipedUnavailableError as exc:
-                logger.warning(
-                    "Piped YouTube path unavailable; falling back to native yt-dlp: %s",
-                    exc,
-                )
-
+    def _download_native(self, url: str, *, job_id: str) -> DownloadOutcome:
         analysis = self.analyzer.analyze(url)
         supported_heights = available_resolutions(analysis)
         if not supported_heights:
             raise ValueError("No supported video format at 480p or higher")
 
-        # The initial plan is always the highest supported resolution.
         current_plan = build_download_plan(
             analysis,
             max_size_bytes=self.max_size_bytes,
@@ -192,7 +174,11 @@ class VideoDownloadCoordinator:
                     available_heights=supported_heights,
                 )
 
-            next_plan = self._next_plan(analysis, current_plan.target_height, supported_heights)
+            next_plan = self._next_plan(
+                analysis,
+                current_plan.target_height,
+                supported_heights,
+            )
             if next_plan is None:
                 return DownloadOutcome(
                     result=result,
@@ -202,3 +188,21 @@ class VideoDownloadCoordinator:
                 )
 
             current_plan = next_plan
+
+    def download(self, url: str, *, job_id: str) -> DownloadOutcome:
+        if is_reddit_url(url):
+            return self._download_reddit(url, job_id=job_id)
+
+        if platform_for_url(url) == "YouTube":
+            try:
+                return self._download_youtube_companion(url, job_id=job_id)
+            except YouTubeCompanionConfigurationError:
+                raise
+            except YouTubeCompanionError as exc:
+                logger.warning(
+                    "YouTube Companion path failed; trying native yt-dlp once: %s",
+                    exc,
+                )
+                return self._download_native(url, job_id=job_id)
+
+        return self._download_native(url, job_id=job_id)

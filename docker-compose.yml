@@ -21,6 +21,32 @@ services:
       retries: 12
       start_period: 5s
 
+  youtube-companion:
+    image: quay.io/invidious/invidious-companion:latest
+    container_name: telegram-video-youtube-companion
+    restart: unless-stopped
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8282"
+      SERVER_BASE_PATH: /companion
+      SERVER_SECRET_KEY: ${YOUTUBE_COMPANION_SECRET_KEY:?Set YOUTUBE_COMPANION_SECRET_KEY (exactly 16 chars) in .env}
+      SERVER_VERIFY_REQUESTS: "false"
+      CACHE_ENABLED: "true"
+      CACHE_DIRECTORY: /var/tmp/youtubei.js
+      JOBS_YOUTUBE_SESSION_PO_TOKEN_ENABLED: "true"
+      JOBS_YOUTUBE_SESSION_FREQUENCY: "*/5 * * * *"
+      NETWORKING_FETCH_TIMEOUT_MS: "30000"
+      NETWORKING_FETCH_RETRY_ENABLED: "true"
+      NETWORKING_FETCH_RETRY_TIMES: "2"
+      NETWORKING_FETCH_RETRY_INITIAL_DEBOUNCE: "500"
+      NETWORKING_FETCH_RETRY_DEBOUNCE_MULTIPLIER: "2"
+      PROXY: ${YOUTUBE_PROXY_URL:-}
+      NETWORKING_IPV6_BLOCK: ${YOUTUBE_IPV6_BLOCK:-}
+    volumes:
+      - youtube_companion_cache:/var/tmp/youtubei.js
+    expose:
+      - "8282"
+
   bot:
     build:
       context: .
@@ -41,10 +67,17 @@ services:
       FFMPEG_PATH: ffmpeg
       FFPROBE_PATH: ffprobe
       DOWNLOAD_ROOT: /data/downloads
+      YTDLP_PROXY_URL: ${YTDLP_PROXY_URL:-}
+      YOUTUBE_PROXY_URL: ${YOUTUBE_PROXY_URL:-}
+      YTDLP_COOKIES_FILE: ${YTDLP_COOKIES_FILE:-}
+      YOUTUBE_COMPANION_BASE_URL: http://youtube-companion:8282/companion
+      YOUTUBE_COMPANION_SECRET_KEY: ${YOUTUBE_COMPANION_SECRET_KEY:-}
     volumes:
       - telegram_bot_downloads:/data/downloads
+      - ${YTDLP_COOKIES_DIR:-./.secrets}:/run/secrets:ro
     command: ["python", "-m", "app.local_runner"]
 
 volumes:
   telegram_bot_api_data:
   telegram_bot_downloads:
+  youtube_companion_cache:
