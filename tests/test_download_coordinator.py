@@ -2,6 +2,7 @@ from unittest.mock import Mock
 
 from app.download_coordinator import VideoDownloadCoordinator
 from app.piped_youtube import PipedUnavailableError
+from app.piped_youtube import PipedUnavailableError
 from app.download_engine import DownloadResult
 from app.media_tools import MediaProbeResult
 from app.video_analyzer import FormatCandidate
