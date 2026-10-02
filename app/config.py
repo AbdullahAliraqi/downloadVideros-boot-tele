@@ -28,6 +28,13 @@ def _normalize_api_base_url(value: str) -> str:
     return f"http://{value}"
 
 
+def _csv_env(name: str) -> tuple[str, ...]:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return ()
+    return tuple(item.strip().rstrip("/") for item in raw.split(",") if item.strip())
+
+
 @dataclass
 class Settings:
     bot_token: str
@@ -37,6 +44,7 @@ class Settings:
     telegram_local_mode: bool
     telegram_max_upload_mb: int
     ytdlp_proxy_url: str
+    piped_api_urls: tuple[str, ...]
     ffmpeg_path: str
     ffprobe_path: str
     download_root: str
@@ -59,6 +67,7 @@ settings = Settings(
     telegram_local_mode=_bool_env("TELEGRAM_LOCAL_MODE", False),
     telegram_max_upload_mb=_int_env("TELEGRAM_MAX_UPLOAD_MB", 50),
     ytdlp_proxy_url=os.getenv("YTDLP_PROXY_URL", "").strip(),
+    piped_api_urls=_csv_env("PIPED_API_URLS"),
     ffmpeg_path=os.getenv("FFMPEG_PATH", "ffmpeg").strip() or "ffmpeg",
     ffprobe_path=os.getenv("FFPROBE_PATH", "ffprobe").strip() or "ffprobe",
     download_root=os.getenv(
