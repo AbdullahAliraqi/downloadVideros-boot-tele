@@ -98,6 +98,53 @@ def test_player_request_uses_companion_bearer_key():
     )
 
 
+def test_player_waits_for_companion_token_before_failing():
+    gateway = YouTubeCompanionGateway(
+        base_url="http://youtube-companion:8282/companion",
+        secret_key="A1b2C3d4E5f6G7h8",
+        readiness_timeout_seconds=10,
+    )
+    first = Mock(status_code=200)
+    first.json.return_value = {
+        "playabilityStatus": {
+            "status": "ERROR",
+            "reason": "Companion is starting. Please wait until a valid potoken is found.",
+        }
+    }
+    second = Mock(status_code=200)
+    second.json.return_value = {
+        "playabilityStatus": {"status": "OK"},
+        "videoDetails": {"title": "Example", "lengthSeconds": "30"},
+        "streamingData": {
+            "formats": [
+                {
+                    "itag": 22,
+                    "mimeType": "video/mp4; codecs=\"avc1.64001F, mp4a.40.2\"",
+                    "width": 1280,
+                    "height": 720,
+                    "bitrate": 2000000,
+                }
+            ],
+            "adaptiveFormats": [],
+        },
+    }
+
+    client = Mock()
+    client.__enter__ = Mock(return_value=client)
+    client.__exit__ = Mock(return_value=None)
+    client.post.side_effect = [first, second]
+
+    with patch("app.youtube_companion.httpx.Client", return_value=client), patch(
+        "app.youtube_companion.time.sleep"
+    ):
+        resolved = gateway.resolve(
+            "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+        )
+
+    assert resolved.video_id == "aqz-KE-bpKQ"
+    assert client.post.call_count == 2
+
+
 def test_player_reports_youtube_bot_block():
     gateway = YouTubeCompanionGateway(
         base_url="http://youtube-companion:8282/companion",
