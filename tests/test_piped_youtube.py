@@ -35,7 +35,7 @@ def test_resolved_video_prefers_progressive_mp4():
                 1080, 1920, "https://progressive", "video/mp4", 7000000, False
             ),
             PipedVideoStream(
-                720, 1280, "https://webm", "video/webm", 9000000, False
+                720, 1280, "https://progressive720", "video/mp4", 6000000, False
             ),
         ),
         audio_streams=(
@@ -71,6 +71,8 @@ def test_resolver_tries_next_piped_instance():
     }
 
     client = Mock()
+    client.__enter__ = Mock(return_value=client)
+    client.__exit__ = Mock(return_value=False)
     client.get.side_effect = [
         RuntimeError("first instance failed"),
         response,
@@ -87,6 +89,8 @@ def test_resolver_tries_next_piped_instance():
 
 def test_resolver_raises_when_all_instances_fail():
     client = Mock()
+    client.__enter__ = Mock(return_value=client)
+    client.__exit__ = Mock(return_value=False)
     client.get.side_effect = RuntimeError("unavailable")
 
     with patch("app.piped_youtube.httpx.Client", return_value=client):
