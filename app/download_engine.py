@@ -64,10 +64,13 @@ class VideoDownloadEngine:
             },
         }
 
-        if settings.ytdlp_proxy_url:
+        if platform_for_url(url) == "YouTube":
+            if settings.youtube_proxy_url:
+                options["proxy"] = settings.youtube_proxy_url
+            if settings.ytdlp_cookies_file:
+                options["cookiefile"] = settings.ytdlp_cookies_file
+        elif settings.ytdlp_proxy_url:
             options["proxy"] = settings.ytdlp_proxy_url
-        if settings.ytdlp_cookies_file and platform_for_url(url) == "YouTube":
-            options["cookiefile"] = settings.ytdlp_cookies_file
 
         with yt_dlp.YoutubeDL(options) as ydl:
             result_code = ydl.download([url])
