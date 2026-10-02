@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
-from .alldl_support import AllDLResolver, AllDLUnavailableError, AllDLVideoDownloadEngine
-from .cobalt_support import CobaltResolver, CobaltUnavailableError, CobaltVideoDownloadEngine
 from .download_engine import DownloadResult, VideoDownloadEngine
 from .reddit_support import RedditVideoDownloadEngine, RedditVideoResolver
 from .url_validator import is_reddit_url
@@ -33,20 +31,12 @@ class VideoDownloadCoordinator:
         *,
         analyzer: VideoMetadataAnalyzer | None = None,
         downloader: VideoDownloadEngine | None = None,
-        cobalt_resolver: CobaltResolver | None = None,
-        cobalt_downloader: CobaltVideoDownloadEngine | None = None,
-        alldl_resolver: AllDLResolver | None = None,
-        alldl_downloader: AllDLVideoDownloadEngine | None = None,
         reddit_resolver: RedditVideoResolver | None = None,
         reddit_downloader: RedditVideoDownloadEngine | None = None,
         max_size_bytes: int = MAX_PLANNING_SIZE_BYTES,
     ) -> None:
         self.analyzer = analyzer or VideoMetadataAnalyzer()
         self.downloader = downloader or VideoDownloadEngine()
-        self.cobalt_resolver = cobalt_resolver or CobaltResolver()
-        self.cobalt_downloader = cobalt_downloader or CobaltVideoDownloadEngine()
-        self.alldl_resolver = alldl_resolver or AllDLResolver()
-        self.alldl_downloader = alldl_downloader or AllDLVideoDownloadEngine()
         self.reddit_resolver = reddit_resolver or RedditVideoResolver()
         self.reddit_downloader = reddit_downloader or RedditVideoDownloadEngine()
         self.max_size_bytes = max_size_bytes
@@ -73,78 +63,6 @@ class VideoDownloadCoordinator:
             max_size_bytes=self.max_size_bytes,
             targets=targets,
         )
-
-    def _download_cobalt(self, url: str, *, job_id: str) -> DownloadOutcome:
-        attempts: list[int] = []
-        current_height = 1080
-        while True:
-            attempts.append(current_height)
-            media = self.cobalt_resolver.resolve(url, current_height)
-            result = self.cobalt_downloader.download(media, job_id=job_id)
-            if result.actual_size <= self.max_size_bytes:
-                actual = result.target_height
-                available = tuple(
-                    height for height in TARGET_RESOLUTIONS if height <= actual
-                ) or (actual,)
-                return DownloadOutcome(
-                    result=result,
-                    attempted_heights=tuple(attempts),
-                    fallback_count=len(attempts) - 1,
-                    available_heights=available,
-                )
-            if current_height == 1080:
-                current_height = 720
-            elif current_height == 720:
-                current_height = 480
-            else:
-                actual = result.target_height
-                available = tuple(
-                    height for height in TARGET_RESOLUTIONS if height <= actual
-                ) or (actual,)
-                return DownloadOutcome(
-                    result=result,
-                    attempted_heights=tuple(attempts),
-                    fallback_count=len(attempts) - 1,
-                    available_heights=available,
-                )
-
-    def _download_alldl(self, url: str, *, job_id: str) -> DownloadOutcome:
-        media = self.alldl_resolver.resolve(url)
-        supported_heights = media.available_heights
-        if not supported_heights:
-            raise AllDLUnavailableError(
-                "AHM7 AllDL returned no supported 1080p/720p/480p variants"
-            )
-
-        attempts: list[int] = []
-        current_height = supported_heights[0]
-
-        while True:
-            attempts.append(current_height)
-            result = self.alldl_downloader.download(
-                media,
-                current_height,
-                job_id=job_id,
-            )
-
-            if result.actual_size <= self.max_size_bytes:
-                return DownloadOutcome(
-                    result=result,
-                    attempted_heights=tuple(attempts),
-                    fallback_count=len(attempts) - 1,
-                    available_heights=supported_heights,
-                )
-
-            next_heights = self._lower_targets(current_height, supported_heights)
-            if not next_heights:
-                return DownloadOutcome(
-                    result=result,
-                    attempted_heights=tuple(attempts),
-                    fallback_count=len(attempts) - 1,
-                    available_heights=supported_heights,
-                )
-
-            current_height = next_heights[0]
 
     def _download_reddit(self, url: str, *, job_id: str) -> DownloadOutcome:
         resolved = self.reddit_resolver.resolve(url)
@@ -189,12 +107,16 @@ class VideoDownloadCoordinator:
 
             current_height = next_heights[0]
 
-    def _download_native(self, url: str, *, job_id: str) -> DownloadOutcome:
+    def download(self, url: str, *, job_id: str) -> DownloadOutcome:
+        if is_reddit_url(url):
+            return self._download_reddit(url, job_id=job_id)
+
         analysis = self.analyzer.analyze(url)
         supported_heights = available_resolutions(analysis)
         if not supported_heights:
             raise ValueError("No supported video format at 480p or higher")
 
+        # The initial plan is always the highest supported resolution.
         current_plan = build_download_plan(
             analysis,
             max_size_bytes=self.max_size_bytes,
@@ -214,11 +136,7 @@ class VideoDownloadCoordinator:
                     available_heights=supported_heights,
                 )
 
-            next_plan = self._next_plan(
-                analysis,
-                current_plan.target_height,
-                supported_heights,
-            )
+            next_plan = self._next_plan(analysis, current_plan.target_height, supported_heights)
             if next_plan is None:
                 return DownloadOutcome(
                     result=result,
@@ -228,20 +146,3 @@ class VideoDownloadCoordinator:
                 )
 
             current_plan = next_plan
-
-    def download(self, url: str, *, job_id: str) -> DownloadOutcome:
-        try:
-            return self._download_cobalt(url, job_id=job_id)
-        except CobaltUnavailableError:
-            pass
-
-        if is_reddit_url(url):
-            try:
-                return self._download_alldl(url, job_id=job_id)
-            except AllDLUnavailableError:
-                return self._download_reddit(url, job_id=job_id)
-
-        try:
-            return self._download_alldl(url, job_id=job_id)
-        except AllDLUnavailableError:
-            return self._download_native(url, job_id=job_id)
