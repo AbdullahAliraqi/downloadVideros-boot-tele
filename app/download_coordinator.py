@@ -2,12 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlparse
-
 from .download_engine import DownloadResult, VideoDownloadEngine
 from .reddit_support import RedditVideoDownloadEngine, RedditVideoResolver
-from .config import settings
-from .youtube_api import PipedYouTubeClient
 from .url_validator import is_reddit_url
 from .video_analyzer import (
     DownloadPlan,
@@ -44,7 +40,6 @@ class VideoDownloadCoordinator:
         self.reddit_resolver = reddit_resolver or RedditVideoResolver()
         self.reddit_downloader = reddit_downloader or RedditVideoDownloadEngine()
         self.max_size_bytes = max_size_bytes
-        self.youtube_client = PipedYouTubeClient()
 
     @staticmethod
     def _lower_targets(current_height: int, available: tuple[int, ...]) -> tuple[int, ...]:
@@ -112,55 +107,9 @@ class VideoDownloadCoordinator:
 
             current_height = next_heights[0]
 
-    def _is_youtube_url(self, url: str) -> bool:
-        host = (urlparse(url).hostname or "").lower()
-        return (
-            host == "youtube.com"
-            or host.endswith(".youtube.com")
-            or host == "youtu.be"
-        )
-
-    def _download_youtube(self, url: str, *, job_id: str) -> DownloadOutcome:
-        info = self.youtube_client.inspect(url)
-        supported_heights = info.available_heights
-        if not supported_heights:
-            raise ValueError("Tunelio found no supported YouTube resolution at 480p or higher")
-
-        attempts: list[int] = []
-        current_height = supported_heights[0]
-        while True:
-            attempts.append(current_height)
-            result = self.youtube_client.download(
-                url,
-                current_height,
-                job_id=job_id,
-                estimated_size=info.size_by_height.get(current_height),
-            )
-
-            if result.actual_size <= self.max_size_bytes:
-                return DownloadOutcome(
-                    result=result,
-                    attempted_heights=tuple(attempts),
-                    fallback_count=len(attempts) - 1,
-                    available_heights=supported_heights,
-                )
-
-            next_heights = tuple(height for height in supported_heights if height < current_height)
-            if not next_heights:
-                return DownloadOutcome(
-                    result=result,
-                    attempted_heights=tuple(attempts),
-                    fallback_count=len(attempts) - 1,
-                    available_heights=supported_heights,
-                )
-            current_height = next_heights[0]
-
     def download(self, url: str, *, job_id: str) -> DownloadOutcome:
         if is_reddit_url(url):
             return self._download_reddit(url, job_id=job_id)
-
-        if self._is_youtube_url(url):
-            return self._download_youtube(url, job_id=job_id)
 
         analysis = self.analyzer.analyze(url)
         supported_heights = available_resolutions(analysis)
