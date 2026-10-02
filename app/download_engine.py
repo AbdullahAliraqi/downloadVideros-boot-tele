@@ -57,6 +57,7 @@ class VideoDownloadEngine:
             "noplaylist": True,
             "overwrites": True,
             "js_runtimes": {"node": {}},
+            "extractor_args": {"youtube": {"player_client": ["android"]}},
         }
 
         with yt_dlp.YoutubeDL(options) as ydl:
