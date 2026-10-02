@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 from .download_engine import DownloadResult, VideoDownloadEngine
+from .piped_youtube import (
+    PipedUnavailableError,
+    PipedYoutubeDownloadEngine,
+    PipedYoutubeResolver,
+)
 from .reddit_support import RedditVideoDownloadEngine, RedditVideoResolver
 from .url_validator import is_reddit_url
 from .video_analyzer import (
@@ -31,12 +36,16 @@ class VideoDownloadCoordinator:
         *,
         analyzer: VideoMetadataAnalyzer | None = None,
         downloader: VideoDownloadEngine | None = None,
+        piped_resolver: PipedYoutubeResolver | None = None,
+        piped_downloader: PipedYoutubeDownloadEngine | None = None,
         reddit_resolver: RedditVideoResolver | None = None,
         reddit_downloader: RedditVideoDownloadEngine | None = None,
         max_size_bytes: int = MAX_PLANNING_SIZE_BYTES,
     ) -> None:
         self.analyzer = analyzer or VideoMetadataAnalyzer()
         self.downloader = downloader or VideoDownloadEngine()
+        self.piped_resolver = piped_resolver or PipedYoutubeResolver()
+        self.piped_downloader = piped_downloader or PipedYoutubeDownloadEngine()
         self.reddit_resolver = reddit_resolver or RedditVideoResolver()
         self.reddit_downloader = reddit_downloader or RedditVideoDownloadEngine()
         self.max_size_bytes = max_size_bytes
@@ -107,9 +116,50 @@ class VideoDownloadCoordinator:
 
             current_height = next_heights[0]
 
+    def _download_piped_youtube(self, url: str, *, job_id: str) -> DownloadOutcome:
+        resolved = self.piped_resolver.resolve(url)
+        supported_heights = resolved.available_heights
+        if not supported_heights:
+            raise PipedUnavailableError("No supported Piped YouTube resolution")
+
+        attempts: list[int] = []
+        current_height = supported_heights[0]
+        while True:
+            attempts.append(current_height)
+            result = self.piped_downloader.download(
+                resolved,
+                current_height,
+                job_id=job_id,
+            )
+            if result.actual_size <= self.max_size_bytes:
+                return DownloadOutcome(
+                    result=result,
+                    attempted_heights=tuple(attempts),
+                    fallback_count=len(attempts) - 1,
+                    available_heights=supported_heights,
+                )
+
+            next_heights = self._lower_targets(current_height, supported_heights)
+            if not next_heights:
+                return DownloadOutcome(
+                    result=result,
+                    attempted_heights=tuple(attempts),
+                    fallback_count=len(attempts) - 1,
+                    available_heights=supported_heights,
+                )
+            current_height = next_heights[0]
+
     def download(self, url: str, *, job_id: str) -> DownloadOutcome:
         if is_reddit_url(url):
             return self._download_reddit(url, job_id=job_id)
+
+        from .url_validator import platform_for_url
+
+        if platform_for_url(url) == "YouTube":
+            try:
+                return self._download_piped_youtube(url, job_id=job_id)
+            except PipedUnavailableError:
+                pass
 
         analysis = self.analyzer.analyze(url)
         supported_heights = available_resolutions(analysis)
