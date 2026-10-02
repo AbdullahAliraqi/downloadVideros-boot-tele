@@ -117,14 +117,14 @@ def _dynamic_instances() -> tuple[str, ...]:
 
 def _instance_candidates() -> tuple[str, ...]:
     values = []
-    for value in (*_dynamic_instances(), *DEFAULT_PIPED_INSTANCES):
+    for value in (*PRIORITY_PIPED_INSTANCES, *_dynamic_instances(), *DEFAULT_PIPED_INSTANCES):
         normalized = value.rstrip("/")
         if normalized and normalized not in values:
             values.append(normalized)
     return tuple(values)
 
 
-MAX_PIPED_METADATA_INSTANCES = 6
+MAX_PIPED_METADATA_INSTANCES = 8
 PIPED_METADATA_TIMEOUT_SECONDS = 8.0
 
 
@@ -159,6 +159,7 @@ class PipedYouTubeClient:
             f"{instance}/streams/{video_id}",
             timeout=PIPED_METADATA_TIMEOUT_SECONDS,
             headers={"Accept": "application/json"},
+            follow_redirects=True,
         )
         response.raise_for_status()
         payload = response.json()
