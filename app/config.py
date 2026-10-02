@@ -21,6 +21,13 @@ def _int_env(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer") from exc
 
 
+def _normalize_api_base_url(value: str) -> str:
+    value = value.strip().rstrip("/")
+    if "://" in value:
+        return value
+    return f"http://{value}"
+
+
 @dataclass
 class Settings:
     bot_token: str
@@ -42,10 +49,12 @@ settings = Settings(
     bot_token=os.getenv("BOT_TOKEN", "").strip(),
     telegram_api_id=os.getenv("TELEGRAM_API_ID", "").strip(),
     telegram_api_hash=os.getenv("TELEGRAM_API_HASH", "").strip(),
-    telegram_api_base_url=os.getenv(
-        "TELEGRAM_API_BASE_URL",
-        "https://api.telegram.org",
-    ).rstrip("/"),
+    telegram_api_base_url=_normalize_api_base_url(
+        os.getenv(
+            "TELEGRAM_API_BASE_URL",
+            "https://api.telegram.org",
+        )
+    ),
     telegram_local_mode=_bool_env("TELEGRAM_LOCAL_MODE", False),
     telegram_max_upload_mb=_int_env("TELEGRAM_MAX_UPLOAD_MB", 50),
     ffmpeg_path=os.getenv("FFMPEG_PATH", "ffmpeg").strip() or "ffmpeg",
