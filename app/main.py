@@ -276,6 +276,32 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/telegram-diagnostic")
+async def telegram_diagnostic() -> dict[str, Any]:
+    """Temporary deployment diagnostic; never returns credentials."""
+    try:
+        me = await telegram_call("getMe", {})
+        webhook = await telegram_call("getWebhookInfo", {})
+        me_result = me.get("result") or {}
+        webhook_result = webhook.get("result") or {}
+        return {
+            "telegram_ok": bool(me.get("ok")),
+            "bot_id": me_result.get("id"),
+            "bot_username": me_result.get("username"),
+            "webhook_url": webhook_result.get("url") or "",
+            "pending_updates": webhook_result.get("pending_update_count", 0),
+            "last_error_message": webhook_result.get("last_error_message"),
+            "last_error_date": webhook_result.get("last_error_date"),
+        }
+    except Exception as exc:
+        logger.exception("Telegram diagnostic failed")
+        return {
+            "telegram_ok": False,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+
+
 @app.post("/webhook")
 async def telegram_webhook(
     request: Request,
