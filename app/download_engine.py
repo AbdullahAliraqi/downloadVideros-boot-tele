@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yt_dlp
 
@@ -62,6 +63,30 @@ class VideoDownloadEngine:
                 "youtubepot-bgutilhttp": {"base_url": "http://127.0.0.1:4416"},
             },
         }
+
+        host = (urlparse(url).hostname or "").lower()
+        is_youtube = (
+            host == "youtube.com"
+            or host.endswith(".youtube.com")
+            or host == "youtu.be"
+        )
+        if settings.ytdlp_proxy_url:
+            options["proxy"] = settings.ytdlp_proxy_url
+        if is_youtube:
+            options["impersonate"] = "chrome"
+            options["extractor_args"] = {
+                "youtube": {
+                    "player_client": [
+                        "tv",
+                        "tv_simply",
+                        "android_vr",
+                        "web_embedded",
+                    ]
+                },
+                "youtubepot-bgutilhttp": {
+                    "base_url": "http://127.0.0.1:4416"
+                },
+            }
 
         with yt_dlp.YoutubeDL(options) as ydl:
             result_code = ydl.download([url])
