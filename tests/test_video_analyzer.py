@@ -176,6 +176,31 @@ def test_analyzer_calls_yt_dlp_with_download_disabled():
         assert result["id"] == "abc"
         assert result["available_resolutions"] == ()
 
+def test_analyzer_uses_youtube_fallback_clients():
+    fake_info = {
+        "id": "abc",
+        "title": "Example",
+        "duration": 12,
+        "formats": [],
+    }
+
+    from app.video_analyzer import VideoMetadataAnalyzer
+
+    with patch("app.video_analyzer.YoutubeDL") as ydl_cls:
+        ydl = ydl_cls.return_value.__enter__.return_value
+        ydl.extract_info.return_value = fake_info
+
+        VideoMetadataAnalyzer().analyze("https://www.youtube.com/watch?v=abc")
+
+        opts = ydl_cls.call_args.args[0]
+        assert opts["extractor_args"]["youtube"]["player_client"] == [
+            "mweb",
+            "tv",
+            "web_safari",
+        ]
+        assert opts["impersonate"].name == "chrome"
+
+
 
 @pytest.mark.parametrize(
     "bad_formats",
