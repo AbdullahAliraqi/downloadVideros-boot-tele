@@ -159,3 +159,55 @@ def test_youtube_uses_native_yt_dlp_pipeline():
         "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
     )
     downloader.download.assert_called_once()
+
+
+def test_youtube_prefers_piped_before_native():
+    piped_resolver = Mock()
+    piped_resolver.resolve.return_value = Mock(available_heights=(1080, 720, 480))
+    piped_downloader = Mock()
+    piped_downloader.download.return_value = result(1080, 100 * 1024 * 1024)
+    native_analyzer = Mock()
+    native_downloader = Mock()
+
+    coordinator = VideoDownloadCoordinator(
+        analyzer=native_analyzer,
+        downloader=native_downloader,
+        piped_resolver=piped_resolver,
+        piped_downloader=piped_downloader,
+    )
+
+    outcome = coordinator.download(
+        "https://www.youtube.com/shorts/pOj_k8_svi8",
+        job_id="piped-1",
+    )
+
+    assert outcome.result.target_height == 1080
+    piped_resolver.resolve.assert_called_once_with(
+        "https://www.youtube.com/shorts/pOj_k8_svi8"
+    )
+    piped_downloader.download.assert_called_once()
+    native_analyzer.analyze.assert_not_called()
+    native_downloader.download.assert_not_called()
+
+
+def test_youtube_falls_back_to_native_when_piped_fails():
+    piped_resolver = Mock()
+    piped_resolver.resolve.side_effect = PipedUnavailableError("unavailable")
+    native_analyzer = Mock()
+    native_analyzer.analyze.return_value = base_analysis()
+    native_downloader = Mock()
+    native_downloader.download.return_value = result(1080, 100 * 1024 * 1024)
+
+    coordinator = VideoDownloadCoordinator(
+        analyzer=native_analyzer,
+        downloader=native_downloader,
+        piped_resolver=piped_resolver,
+    )
+
+    outcome = coordinator.download(
+        "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+        job_id="piped-2",
+    )
+
+    assert outcome.result.target_height == 1080
+    native_analyzer.analyze.assert_called_once()
