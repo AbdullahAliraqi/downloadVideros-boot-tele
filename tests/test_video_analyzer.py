@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
+from app.config import settings
 from app.video_analyzer import (
     MAX_PLANNING_SIZE_BYTES,
     available_resolutions,
@@ -175,6 +176,32 @@ def test_analyzer_calls_yt_dlp_with_download_disabled():
         ydl.extract_info.assert_called_once_with("https://example.com/video", download=False)
         assert result["id"] == "abc"
         assert result["available_resolutions"] == ()
+
+def test_analyzer_uses_configured_youtube_cookies():
+    fake_info = {
+        "id": "abc",
+        "title": "Example",
+        "duration": 12,
+        "formats": [],
+    }
+
+    from app.video_analyzer import VideoMetadataAnalyzer
+
+    with patch.object(
+        settings,
+        "ytdlp_cookies_file",
+        "/run/secrets/youtube-cookies.txt",
+    ), patch("app.video_analyzer.yt_dlp.YoutubeDL") as ydl_cls:
+        ydl = ydl_cls.return_value.__enter__.return_value
+        ydl.extract_info.return_value = fake_info
+
+        VideoMetadataAnalyzer().analyze(
+            "https://www.youtube.com/watch?v=abc"
+        )
+
+        opts = ydl_cls.call_args.args[0]
+        assert opts["cookiefile"] == "/run/secrets/youtube-cookies.txt"
+
 
 def test_analyzer_uses_yt_dlp_default_youtube_clients():
     fake_info = {
