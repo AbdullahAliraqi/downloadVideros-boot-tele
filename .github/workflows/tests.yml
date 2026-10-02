@@ -255,3 +255,25 @@ jobs:
         run: |
           docker compose -f /tmp/compose-no-potoken.yml logs --no-color youtube-companion || true
           docker compose -f /tmp/compose-no-potoken.yml down -v
+
+  youtube-ytdlp-client-matrix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install yt-dlp
+        run: pip install -r requirements.txt
+      - name: Probe supported YouTube clients
+        run: |
+          set +e
+          for client in default mweb web_safari android_vr tv_embedded web_embedded; do
+            echo "===== CLIENT: $client ====="
+            if [ "$client" = "default" ]; then
+              python -m yt_dlp                 --no-playlist                 --skip-download                 -F                 "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+            else
+              python -m yt_dlp                 --no-playlist                 --skip-download                 -F                 --extractor-args "youtube:player_client=$client"                 "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+            fi
+            echo "exit=$?"
+          done
