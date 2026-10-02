@@ -59,7 +59,7 @@ class VideoDownloadEngine:
             "overwrites": True,
             "js_runtimes": {"node": {}},
             "extractor_args": {
-                "youtube": {"player_client": ["android_vr", "web_embedded"]},
+                "youtube": {"player_client": ["mweb", "tv", "web_safari"]},
                 "youtubepot-bgutilhttp": {"base_url": "http://127.0.0.1:4416"},
             },
         }
@@ -77,10 +77,9 @@ class VideoDownloadEngine:
             options["extractor_args"] = {
                 "youtube": {
                     "player_client": [
+                        "mweb",
                         "tv",
-                        "tv_simply",
-                        "android_vr",
-                        "web_embedded",
+                        "web_safari",
                     ]
                 },
                 "youtubepot-bgutilhttp": {
