@@ -12,6 +12,10 @@ Portrait video quality is classified by the shorter video dimension, so 1080x192
 
 The production deployment is Docker Compose with the Local Telegram Bot API. Both the Bot API state and downloaded media use Docker named volumes; this avoids the Windows bind-mount failure that previously caused Telegram Bot API binlog crashes.
 
+### YouTube production requirement
+
+YouTube is handled by the native yt-dlp pipeline with the bundled bgutil Proof-of-Origin token provider. The Blitz-hosted deployment can still be blocked because YouTube may block data-center IP addresses even when PO tokens are available. For reliable production operation, run the production stack on a VPS with a working outbound IP, or configure `YTDLP_PROXY_URL` with a suitable proxy. The bot cannot manufacture a clean YouTube egress IP from application code alone.
+
 1. Copy `.env.example` to `.env`.
 2. Put your real Telegram credentials in `.env`. Never commit it.
 3. Run:
