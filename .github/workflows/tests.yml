@@ -160,3 +160,98 @@ jobs:
         run: |
           docker compose logs --no-color youtube-companion || true
           docker compose down -v
+
+  youtube-companion-no-potoken-smoke:
+    runs-on: ubuntu-latest
+    env:
+      BOT_TOKEN: test-token
+      TELEGRAM_API_ID: "123456"
+      TELEGRAM_API_HASH: test-hash
+      YOUTUBE_COMPANION_SECRET_KEY: A1b2C3d4E5f6G7h8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start Companion without PO-token mode
+        run: |
+          cp docker-compose.yml /tmp/compose-no-potoken.yml
+          sed -i 's/JOBS_YOUTUBE_SESSION_PO_TOKEN_ENABLED: "true"/JOBS_YOUTUBE_SESSION_PO_TOKEN_ENABLED: "false"/' /tmp/compose-no-potoken.yml
+          docker compose -f /tmp/compose-no-potoken.yml up -d youtube-companion
+      - name: Verify YouTube player path without PO token
+        run: |
+          set -euo pipefail
+          healthy=false
+          for i in $(seq 1 60); do
+            if docker run --rm --network container:telegram-video-youtube-companion curlimages/curl:latest -fsS http://127.0.0.1:8282/healthz >/dev/null; then
+              healthy=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$healthy" != "true" ]; then
+            docker compose -f /tmp/compose-no-potoken.yml logs --no-color youtube-companion || true
+            exit 1
+          fi
+
+          docker run --rm -i             --network container:telegram-video-youtube-companion             -e YOUTUBE_COMPANION_SECRET_KEY="$YOUTUBE_COMPANION_SECRET_KEY"             python:3.14-slim             python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          base = "http://127.0.0.1:8282/companion"
+          key = os.environ["YOUTUBE_COMPANION_SECRET_KEY"]
+          video_id = "aqz-KE-bpKQ"
+
+          request = urllib.request.Request(
+              f"{base}/youtubei/v1/player",
+              data=json.dumps({"videoId": video_id}).encode(),
+              headers={
+                  "Authorization": f"Bearer {key}",
+                  "Content-Type": "application/json",
+                  "Accept": "application/json",
+              },
+              method="POST",
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=60) as response:
+                  payload = json.load(response)
+          except urllib.error.HTTPError as exc:
+              raise SystemExit(f"Companion player failed: HTTP {exc.code}") from exc
+
+          playability = payload.get("playabilityStatus") or {}
+          if playability.get("status") != "OK":
+              raise SystemExit(
+                  f"Companion player rejected {video_id}: {playability!r}"
+              )
+
+          streaming = payload.get("streamingData") or {}
+          formats = (streaming.get("formats") or []) + (streaming.get("adaptiveFormats") or [])
+          candidates = [
+              item for item in formats
+              if isinstance(item, dict)
+              and str(item.get("mimeType", "")).startswith("video/mp4")
+              and item.get("itag") is not None
+          ]
+          if not candidates:
+              raise SystemExit("Companion returned no MP4 video format without PO token")
+
+          candidates.sort(
+              key=lambda item: (
+                  int(item.get("height") or 0),
+                  int(item.get("bitrate") or 0),
+              ),
+              reverse=True,
+          )
+          selected = candidates[0]
+          print(json.dumps({
+              "video_id": video_id,
+              "playability": playability.get("status"),
+              "selected_itag": int(selected["itag"]),
+              "selected_height": selected.get("height"),
+              "selected_mime": selected.get("mimeType"),
+          }))
+          PY
+      - name: Stop Companion without PO-token mode
+        if: always()
+        run: |
+          docker compose -f /tmp/compose-no-potoken.yml logs --no-color youtube-companion || true
+          docker compose -f /tmp/compose-no-potoken.yml down -v
