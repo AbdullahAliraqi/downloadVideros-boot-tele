@@ -153,6 +153,7 @@ def test_youtube_uses_piped_backend():
             720: 90 * 1024 * 1024,
             480: 50 * 1024 * 1024,
         },
+        instance_url="https://pipedapi.example",
     )
     youtube_client.download.return_value = result(1080, 150 * 1024 * 1024)
 
