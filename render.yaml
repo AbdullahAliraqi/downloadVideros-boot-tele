@@ -1,29 +1,57 @@
 services:
+  # Public bot service. Receives Telegram webhooks.
   - type: web
     name: telegram-video-downloader
     runtime: docker
-    plan: free
-    healthCheckPath: /health
+    plan: 1c-2g
     dockerfilePath: ./Dockerfile
     dockerContext: .
+    healthCheckPath: /health
     envVars:
       - key: BOT_TOKEN
         sync: false
       - key: WEBHOOK_SECRET
-        sync: false
+        generateValue: true
       - key: WEBHOOK_BASE_URL
-        sync: false
+        fromService:
+          name: telegram-video-downloader
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
       - key: TELEGRAM_API_BASE_URL
-        value: https://api.telegram.org
+        fromService:
+          name: telegram-bot-api
+          type: pserv
+          property: hostport
       - key: TELEGRAM_LOCAL_MODE
-        value: "false"
-      # Telegram's hosted Bot API currently limits bot uploads to 50 MB.
-      # The local Docker deployment keeps the 2000 MB limit.
+        value: "true"
       - key: TELEGRAM_MAX_UPLOAD_MB
-        value: "50"
+        value: "2000"
       - key: FFMPEG_PATH
         value: ffmpeg
       - key: FFPROBE_PATH
         value: ffprobe
       - key: DOWNLOAD_ROOT
         value: /tmp/telegram-video-downloads
+
+  # Local Telegram Bot API server for the 2000 MB upload target.
+  - type: pserv
+    name: telegram-bot-api
+    runtime: image
+    plan: 0.5c-512mb
+    image:
+      url: docker.io/aiogram/telegram-bot-api:latest
+    envVars:
+      - key: TELEGRAM_API_ID
+        sync: false
+      - key: TELEGRAM_API_HASH
+        sync: false
+      - key: TELEGRAM_LOCAL
+        value: "1"
+      - key: TELEGRAM_STAT
+        value: "1"
+      - key: TELEGRAM_HTTP_PORT
+        value: "8081"
+    disk:
+      name: telegram-bot-api-data
+      mountPath: /var/lib/telegram-bot-api
+      sizeGB: 10
