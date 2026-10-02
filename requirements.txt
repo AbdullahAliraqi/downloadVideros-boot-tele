@@ -1,7 +1,7 @@
 fastapi>=0.115,<1
 httpx>=0.28,<1
 uvicorn[standard]>=0.34,<1
-yt-dlp>=2026.8
+yt-dlp @ https://github.com/yt-dlp/yt-dlp/archive/51bab8a.tar.gz
 yt-dlp-ejs>=0.8
 curl-cffi>=0.16,<0.17
 bgutil-ytdlp-pot-provider==2.0.1
