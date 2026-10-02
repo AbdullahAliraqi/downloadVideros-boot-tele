@@ -18,6 +18,14 @@ from .video_analyzer import TARGET_RESOLUTIONS
 
 INSTANCE_LIST_URL = "https://raw.githubusercontent.com/wiki/TeamPiped/Piped/Instances.md"
 
+# These instances were independently observed serving the /streams endpoint
+# recently; keep them ahead of the larger public list so a broken instance
+# cannot consume the entire metadata probe window.
+PRIORITY_PIPED_INSTANCES = (
+    "https://pipedapi.ducks.party",
+    "https://api.piped.private.coffee",
+)
+
 DEFAULT_PIPED_INSTANCES = (
     "https://pipedapi.kavin.rocks",
     "https://pipedapi.leptons.xyz",
