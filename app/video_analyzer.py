@@ -87,7 +87,6 @@ class VideoMetadataAnalyzer:
             "noplaylist": True,
             "js_runtimes": {"node": {}},
             "extractor_args": {
-                "youtube": {"player_client": ["mweb", "tv", "web_safari"]},
                 "youtubepot-bgutilhttp": {"base_url": "http://127.0.0.1:4416"},
             },
         }
@@ -106,19 +105,6 @@ class VideoMetadataAnalyzer:
         if settings.ytdlp_proxy_url:
             options["proxy"] = settings.ytdlp_proxy_url
         if is_youtube:
-            options["impersonate"] = yt_dlp.networking.impersonate.ImpersonateTarget.from_str("chrome")
-            options["extractor_args"] = {
-                "youtube": {
-                    "player_client": [
-                        "mweb",
-                        "tv",
-                        "web_safari",
-                    ]
-                },
-                "youtubepot-bgutilhttp": {
-                    "base_url": "http://127.0.0.1:4416"
-                },
-            }
 
         with yt_dlp.YoutubeDL(options) as ydl:
             info = ydl.extract_info(url, download=False)
