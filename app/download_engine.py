@@ -63,15 +63,8 @@ class VideoDownloadEngine:
             },
         }
 
-        host = (urlparse(url).hostname or "").lower()
-        is_youtube = (
-            host == "youtube.com"
-            or host.endswith(".youtube.com")
-            or host == "youtu.be"
-        )
         if settings.ytdlp_proxy_url:
             options["proxy"] = settings.ytdlp_proxy_url
-        if is_youtube:
 
         with yt_dlp.YoutubeDL(options) as ydl:
             result_code = ydl.download([url])
