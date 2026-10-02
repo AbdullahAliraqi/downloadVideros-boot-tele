@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 from yt_dlp import YoutubeDL
+
+from .config import settings
 
 MAX_VIDEO_SIZE_MB = 2000
 MAX_PLANNING_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024
@@ -93,7 +96,32 @@ class VideoMetadataAnalyzer:
         self._ydl_opts = options
 
     def analyze(self, url: str) -> dict[str, Any]:
-        with YoutubeDL(self._ydl_opts) as ydl:
+        options = dict(self._ydl_opts)
+        host = (urlparse(url).hostname or "").lower()
+        is_youtube = (
+            host == "youtube.com"
+            or host.endswith(".youtube.com")
+            or host == "youtu.be"
+        )
+        if settings.ytdlp_proxy_url:
+            options["proxy"] = settings.ytdlp_proxy_url
+        if is_youtube:
+            options["impersonate"] = "chrome"
+            options["extractor_args"] = {
+                "youtube": {
+                    "player_client": [
+                        "tv",
+                        "tv_simply",
+                        "android_vr",
+                        "web_embedded",
+                    ]
+                },
+                "youtubepot-bgutilhttp": {
+                    "base_url": "http://127.0.0.1:4416"
+                },
+            }
+
+        with YoutubeDL(options) as ydl:
             info = ydl.extract_info(url, download=False)
 
         formats = [_parse_format(item) for item in (info.get("formats") or [])]
