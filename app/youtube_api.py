@@ -17,6 +17,16 @@ from .media_tools import FFmpegTools
 from .video_analyzer import TARGET_RESOLUTIONS
 
 INSTANCE_LIST_URL = "https://raw.githubusercontent.com/wiki/TeamPiped/Piped/Instances.md"
+INVIDIOUS_INSTANCE_LIST_URL = "https://api.invidious.io/instances.json"
+
+# Officially listed Invidious instances are used as a second provider when
+# Piped cannot resolve the requested YouTube video.
+DEFAULT_INVIDIOUS_INSTANCES = (
+    "https://inv.nadeko.net",
+    "https://invidious.nerdvpn.de",
+    "https://yt.chocolatemoo53.com",
+    "https://invidious.tiekoetter.com",
+)
 
 # These instances were independently observed serving the /streams endpoint
 # recently; keep them ahead of the larger public list so a broken instance
@@ -25,6 +35,9 @@ PRIORITY_PIPED_INSTANCES = (
     "https://pipedapi.ducks.party",
     "https://api.piped.private.coffee",
 )
+
+MAX_INVIDIOUS_INSTANCES = 4
+INVIDIOUS_TIMEOUT_SECONDS = 8.0
 
 DEFAULT_PIPED_INSTANCES = (
     "https://pipedapi.kavin.rocks",
@@ -115,6 +128,36 @@ def _dynamic_instances() -> tuple[str, ...]:
     return DEFAULT_PIPED_INSTANCES
 
 
+@lru_cache(maxsize=1)
+def _invidious_instances() -> tuple[str, ...]:
+    values: list[str] = []
+
+    try:
+        response = httpx.get(INVIDIOUS_INSTANCE_LIST_URL, timeout=5.0)
+        response.raise_for_status()
+        payload = response.json()
+        if isinstance(payload, dict):
+            for entries in payload.values():
+                if not isinstance(entries, list):
+                    continue
+                for entry in entries:
+                    if not isinstance(entry, dict) or not entry.get("api"):
+                        continue
+                    uri = entry.get("uri")
+                    if isinstance(uri, str) and uri.startswith("https://"):
+                        uri = uri.rstrip("/")
+                        if uri not in values:
+                            values.append(uri)
+    except Exception:
+        pass
+
+    for uri in DEFAULT_INVIDIOUS_INSTANCES:
+        if uri not in values:
+            values.append(uri)
+
+    return tuple(values)
+
+
 def _instance_candidates() -> tuple[str, ...]:
     values = []
     for value in (*PRIORITY_PIPED_INSTANCES, *_dynamic_instances(), *DEFAULT_PIPED_INSTANCES):
@@ -198,11 +241,182 @@ class PipedYouTubeClient:
             + " | ".join(errors)
         )
 
+
+    @staticmethod
+    def _invidious_quality_height(item: dict) -> int | None:
+        for value in (item.get("qualityLabel"), item.get("quality"), item.get("resolution")):
+            if not isinstance(value, str):
+                continue
+            match = re.search(r"(\d{3,4})p", value.lower())
+            if match:
+                height = int(match.group(1))
+                if height in TARGET_RESOLUTIONS:
+                    return height
+        return None
+
+    @staticmethod
+    def _invidious_size(item: dict) -> int | None:
+        for key in ("size", "clen", "contentLength", "content_length"):
+            value = item.get(key)
+            if isinstance(value, int) and value >= 0:
+                return value
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
+        return None
+
+    @staticmethod
+    def _invidious_is_audio(item: dict) -> bool:
+        media_type = str(item.get("type") or "").lower()
+        return media_type.startswith("audio/") or "audio" in media_type
+
+    @staticmethod
+    def _invidious_is_video(item: dict) -> bool:
+        media_type = str(item.get("type") or "").lower()
+        return media_type.startswith("video/") or "video" in media_type
+
+    @staticmethod
+    def _invidious_candidates(payload: dict) -> tuple[list[dict], list[dict]]:
+        progressive = [
+            item for item in payload.get("formatStreams", [])
+            if isinstance(item, dict)
+            and isinstance(item.get("url"), str)
+            and item.get("url")
+            and PipedYouTubeClient._invidious_quality_height(item) in TARGET_RESOLUTIONS
+        ]
+        adaptive = [
+            item for item in payload.get("adaptiveFormats", [])
+            if isinstance(item, dict)
+            and isinstance(item.get("url"), str)
+            and item.get("url")
+        ]
+        return progressive, adaptive
+
+    @staticmethod
+    def _fetch_invidious_payload(instance: str, video_id: str) -> tuple[str, dict]:
+        response = httpx.get(
+            f"{instance}/api/v1/videos/{video_id}",
+            timeout=INVIDIOUS_TIMEOUT_SECONDS,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "Mozilla/5.0",
+            },
+            follow_redirects=True,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("invalid JSON response")
+        progressive, adaptive = PipedYouTubeClient._invidious_candidates(payload)
+        if not progressive and not adaptive:
+            raise RuntimeError("no usable media streams")
+        return instance, payload
+
+    def _get_invidious_payload(
+        self,
+        video_id: str,
+        preferred_instance: str | None = None,
+    ) -> tuple[str, dict]:
+        candidates: list[str] = []
+        if preferred_instance:
+            candidates.append(preferred_instance.rstrip("/"))
+        candidates.extend(
+            item for item in _invidious_instances()
+            if item.rstrip("/") not in candidates
+        )
+        candidates = candidates[:MAX_INVIDIOUS_INSTANCES]
+
+        errors = []
+        with ThreadPoolExecutor(max_workers=len(candidates) or 1) as executor:
+            futures = {
+                executor.submit(self._fetch_invidious_payload, instance, video_id): instance
+                for instance in candidates
+            }
+            for future in as_completed(futures):
+                instance = futures[future]
+                try:
+                    return future.result()
+                except Exception as exc:
+                    errors.append(f"{instance}: {type(exc).__name__}: {exc}")
+
+        raise RuntimeError(
+            "No responsive Invidious instance returned usable YouTube metadata: "
+            + " | ".join(errors)
+        )
+
+    def _inspect_invidious(self, instance: str, payload: dict) -> PipedInfo:
+        progressive, adaptive = self._invidious_candidates(payload)
+        video_adaptive = [
+            item for item in adaptive
+            if self._invidious_is_video(item)
+            and self._invidious_quality_height(item) in TARGET_RESOLUTIONS
+        ]
+        audio_adaptive = [
+            item for item in adaptive
+            if self._invidious_is_audio(item)
+            and isinstance(item.get("url"), str)
+            and item.get("url")
+        ]
+
+        heights = tuple(
+            height for height in TARGET_RESOLUTIONS
+            if any(self._invidious_quality_height(item) == height for item in progressive)
+            or any(self._invidious_quality_height(item) == height for item in video_adaptive)
+        )
+
+        best_audio_size = max(
+            (self._invidious_size(item) or 0 for item in audio_adaptive),
+            default=0,
+        )
+        sizes: dict[int, int] = {}
+        for height in heights:
+            progressive_sizes = [
+                self._invidious_size(item) or 0
+                for item in progressive
+                if self._invidious_quality_height(item) == height
+            ]
+            if progressive_sizes:
+                sizes[height] = max(progressive_sizes)
+                continue
+
+            video_sizes = [
+                self._invidious_size(item)
+                for item in video_adaptive
+                if self._invidious_quality_height(item) == height
+            ]
+            video_sizes = [size for size in video_sizes if size is not None]
+            if video_sizes and best_audio_size:
+                sizes[height] = max(video_sizes) + best_audio_size
+
+        return PipedInfo(
+            title=str(payload.get("title") or "YouTube video"),
+            duration_seconds=(
+                float(payload["lengthSeconds"])
+                if isinstance(payload.get("lengthSeconds"), (int, float))
+                else None
+            ),
+            available_heights=heights,
+            size_by_height=sizes,
+            instance_url=f"invidious:{instance}",
+        )
+
     def inspect(self, url: str) -> PipedInfo:
         video_id = youtube_video_id(url)
-        instance, payload = self._get_payload(video_id)
-        videos = self._video_candidates(payload)
-        audios = self._audio_candidates(payload)
+        try:
+            instance, payload = self._get_payload(video_id)
+            videos = self._video_candidates(payload)
+            audios = self._audio_candidates(payload)
+        except Exception as piped_error:
+            try:
+                instance, payload = self._get_invidious_payload(video_id)
+                info = self._inspect_invidious(instance, payload)
+                if info.available_heights:
+                    return info
+                raise RuntimeError("Invidious returned no 480p+ resolutions")
+            except Exception as invidious_error:
+                raise RuntimeError(
+                    f"YouTube providers failed: Piped={piped_error}; "
+                    f"Invidious={invidious_error}"
+                ) from invidious_error
 
         heights = tuple(
             height for height in TARGET_RESOLUTIONS
@@ -238,6 +452,105 @@ class PipedYouTubeClient:
             instance_url=instance,
         )
 
+
+    def _download_invidious(
+        self,
+        video_id: str,
+        target_height: int,
+        *,
+        job_id: str,
+        estimated_size: int | None,
+        preferred_instance: str,
+    ) -> DownloadResult:
+        root = Path(settings.download_root)
+        job_dir = root / job_id
+        if job_dir.exists():
+            shutil.rmtree(job_dir)
+        job_dir.mkdir(parents=True, exist_ok=True)
+
+        instances = [preferred_instance.rstrip("/")]
+        instances.extend(
+            item for item in _invidious_instances()
+            if item.rstrip("/") not in instances
+        )
+        instances = instances[:MAX_INVIDIOUS_INSTANCES]
+        last_error: Exception | None = None
+
+        for instance in instances:
+            try:
+                _, payload = self._get_invidious_payload(
+                    video_id,
+                    preferred_instance=instance,
+                )
+                progressive, adaptive = self._invidious_candidates(payload)
+                progressive = [
+                    item for item in progressive
+                    if self._invidious_quality_height(item) == target_height
+                ]
+                adaptive_video = [
+                    item for item in adaptive
+                    if self._invidious_is_video(item)
+                    and self._invidious_quality_height(item) == target_height
+                ]
+                adaptive_audio = [
+                    item for item in adaptive
+                    if self._invidious_is_audio(item)
+                    and isinstance(item.get("url"), str)
+                    and item.get("url")
+                ]
+
+                output = job_dir / f"{video_id}_{target_height}p.mp4"
+                if progressive:
+                    selected = max(
+                        progressive,
+                        key=lambda item: (
+                            self._invidious_size(item) or 0,
+                            item.get("bitrate") or 0,
+                        ),
+                    )
+                    self._download_url(selected["url"], output)
+                elif adaptive_video and adaptive_audio:
+                    video = max(
+                        adaptive_video,
+                        key=lambda item: (
+                            self._invidious_size(item) or 0,
+                            item.get("bitrate") or 0,
+                        ),
+                    )
+                    audio = max(
+                        adaptive_audio,
+                        key=lambda item: (
+                            self._invidious_size(item) or 0,
+                            item.get("bitrate") or 0,
+                        ),
+                    )
+                    self._merge_urls(video["url"], audio["url"], output)
+                else:
+                    raise RuntimeError(
+                        f"Invidious has no downloadable {target_height}p video+audio"
+                    )
+
+                probe = self.ffmpeg.probe(output)
+                return DownloadResult(
+                    job_id=job_id,
+                    file_path=output,
+                    target_height=target_height,
+                    selected_format=f"invidious:{target_height}p",
+                    estimated_size=estimated_size,
+                    actual_size=probe.size_bytes,
+                    exceeds_planning_limit=probe.size_bytes
+                    > settings.telegram_max_upload_mb * 1024 * 1024,
+                    probe=probe,
+                )
+            except Exception as exc:
+                last_error = exc
+                shutil.rmtree(job_dir, ignore_errors=True)
+                job_dir.mkdir(parents=True, exist_ok=True)
+
+        raise RuntimeError(
+            f"All Invidious media downloads failed for {target_height}p: {last_error}"
+        )
+
     def download(
         self,
         url: str,
@@ -256,6 +569,16 @@ class PipedYouTubeClient:
         job_dir.mkdir(parents=True, exist_ok=True)
 
         info = self.inspect(url)
+
+        if info.instance_url.startswith("invidious:"):
+            return self._download_invidious(
+                video_id,
+                target_height,
+                job_id=job_id,
+                estimated_size=estimated_size,
+                preferred_instance=info.instance_url.removeprefix("invidious:"),
+            )
+
         instances = (info.instance_url,) + tuple(
             item for item in _instance_candidates()
             if item != info.instance_url
