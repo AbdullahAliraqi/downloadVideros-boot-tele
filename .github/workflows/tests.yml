@@ -38,14 +38,22 @@ jobs:
       - name: Wait for Companion and verify YouTube player + stream path
         run: |
           set -euo pipefail
+          healthy=false
           for i in $(seq 1 90); do
-            if docker run --rm --network container:telegram-video-youtube-companion curlimages/curl:latest -fsS http://127.0.0.1:8282/companion/healthz >/dev/null; then
+            if docker run --rm --network container:telegram-video-youtube-companion curlimages/curl:latest -fsS http://127.0.0.1:8282/healthz >/dev/null; then
+              healthy=true
               break
             fi
             sleep 2
           done
 
-          docker run --rm             --network container:telegram-video-youtube-companion             -e YOUTUBE_COMPANION_SECRET_KEY="$YOUTUBE_COMPANION_SECRET_KEY"             python:3.14-slim             python - <<'PY'
+          if [ "$healthy" != "true" ]; then
+            echo "YouTube Companion did not become healthy"
+            docker compose logs --no-color youtube-companion || true
+            exit 1
+          fi
+
+          docker run --rm -i             --network container:telegram-video-youtube-companion             -e YOUTUBE_COMPANION_SECRET_KEY="$YOUTUBE_COMPANION_SECRET_KEY"             python:3.14-slim             python - <<'PY'
           import json
           import os
           import urllib.error
@@ -149,4 +157,6 @@ jobs:
           PY
       - name: Stop YouTube Companion
         if: always()
-        run: docker compose down -v
+        run: |
+          docker compose logs --no-color youtube-companion || true
+          docker compose down -v
