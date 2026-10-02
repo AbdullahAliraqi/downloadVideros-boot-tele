@@ -18,6 +18,7 @@ from .video_analyzer import TARGET_RESOLUTIONS
 
 INSTANCE_LIST_URL = "https://raw.githubusercontent.com/wiki/TeamPiped/Piped/Instances.md"
 INVIDIOUS_INSTANCE_LIST_URL = "https://api.invidious.io/instances.json"
+ALLDL_API_URL = "https://ahm7xmakki.com/api/alldl"
 
 # Officially listed Invidious instances are used as a second provider when
 # Piped cannot resolve the requested YouTube video.
@@ -343,6 +344,120 @@ class PipedYouTubeClient:
             + " | ".join(errors)
         )
 
+    @staticmethod
+    def _fetch_alldl_payload(url: str) -> dict:
+        response = httpx.get(
+            ALLDL_API_URL,
+            params={"url": url},
+            timeout=20.0,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "Mozilla/5.0",
+            },
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or payload.get("success") is not True:
+            raise RuntimeError(
+                str((payload or {}).get("message") or "AllDL returned no downloadable media")
+            )
+        media = payload.get("mediaInfo")
+        if not isinstance(media, dict):
+            raise RuntimeError("AllDL returned invalid mediaInfo")
+        return media
+
+    @staticmethod
+    def _alldl_height(value: object) -> int | None:
+        if not isinstance(value, str):
+            return None
+        match = re.search(r"(\d{3,4})p", value.lower())
+        if not match:
+            return None
+        height = int(match.group(1))
+        return height if height in TARGET_RESOLUTIONS else None
+
+    @classmethod
+    def _alldl_quality_urls(cls, media: dict) -> dict[int, str]:
+        values: dict[int, str] = {}
+        qualities = media.get("qualities")
+        if isinstance(qualities, list):
+            for item in qualities:
+                if not isinstance(item, dict):
+                    continue
+                height = cls._alldl_height(item.get("quality"))
+                url = item.get("url")
+                if height is not None and isinstance(url, str) and url:
+                    values[height] = url
+        return values
+
+    def _inspect_alldl(self, url: str) -> PipedInfo:
+        media = self._fetch_alldl_payload(url)
+        quality_urls = self._alldl_quality_urls(media)
+        heights = tuple(height for height in TARGET_RESOLUTIONS if height in quality_urls)
+        if not heights and isinstance(media.get("videoUrl"), str) and media.get("videoUrl"):
+            heights = (480,)
+            quality_urls = {480: media["videoUrl"]}
+
+        if not heights:
+            raise RuntimeError("AllDL returned no 480p+ YouTube video")
+
+        return PipedInfo(
+            title=str(media.get("title") or "YouTube video"),
+            duration_seconds=None,
+            available_heights=heights,
+            size_by_height={},
+            instance_url="alldl:",
+        )
+
+    def _download_alldl(
+        self,
+        url: str,
+        target_height: int,
+        *,
+        job_id: str,
+        estimated_size: int | None,
+    ) -> DownloadResult:
+        self.ffmpeg.check()
+        root = Path(settings.download_root)
+        job_dir = root / job_id
+        if job_dir.exists():
+            shutil.rmtree(job_dir)
+        job_dir.mkdir(parents=True, exist_ok=True)
+
+        media = self._fetch_alldl_payload(url)
+        quality_urls = self._alldl_quality_urls(media)
+        selected_url = quality_urls.get(target_height)
+
+        if selected_url is None and isinstance(media.get("videoUrl"), str):
+            selected_url = media["videoUrl"]
+
+        if not selected_url:
+            raise RuntimeError(
+                f"AllDL did not return a downloadable URL for {target_height}p"
+            )
+
+        output = job_dir / f"{youtube_video_id(url)}_{target_height}p.mp4"
+        try:
+            self._download_url(selected_url, output)
+        except Exception as exc:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            raise RuntimeError(
+                f"AllDL media URL failed for {target_height}p: {exc}"
+            ) from exc
+
+        probe = self.ffmpeg.probe(output)
+        return DownloadResult(
+            job_id=job_id,
+            file_path=output,
+            target_height=target_height,
+            selected_format=f"alldl:{target_height}p",
+            estimated_size=estimated_size,
+            actual_size=probe.size_bytes,
+            exceeds_planning_limit=probe.size_bytes
+            > settings.telegram_max_upload_mb * 1024 * 1024,
+            probe=probe,
+        )
+
     def _inspect_invidious(self, instance: str, payload: dict) -> PipedInfo:
         progressive, adaptive = self._invidious_candidates(payload)
         video_adaptive = [
@@ -413,10 +528,16 @@ class PipedYouTubeClient:
                     return info
                 raise RuntimeError("Invidious returned no 480p+ resolutions")
             except Exception as invidious_error:
-                raise RuntimeError(
-                    f"YouTube providers failed: Piped={piped_error}; "
-                    f"Invidious={invidious_error}"
-                ) from invidious_error
+                try:
+                    info = self._inspect_alldl(url)
+                    if info.available_heights:
+                        return info
+                    raise RuntimeError("AllDL returned no 480p+ resolutions")
+                except Exception as alldl_error:
+                    raise RuntimeError(
+                        f"YouTube providers failed: Piped={piped_error}; "
+                        f"Invidious={invidious_error}; AllDL={alldl_error}"
+                    ) from alldl_error
 
         heights = tuple(
             height for height in TARGET_RESOLUTIONS
@@ -577,6 +698,14 @@ class PipedYouTubeClient:
                 job_id=job_id,
                 estimated_size=estimated_size,
                 preferred_instance=info.instance_url.removeprefix("invidious:"),
+            )
+
+        if info.instance_url == "alldl:":
+            return self._download_alldl(
+                url,
+                target_height,
+                job_id=job_id,
+                estimated_size=estimated_size,
             )
 
         instances = (info.instance_url,) + tuple(
