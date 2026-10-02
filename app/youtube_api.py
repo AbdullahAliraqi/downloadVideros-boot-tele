@@ -3,7 +3,9 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -86,9 +88,10 @@ def _stream_size(item: dict) -> int | None:
     return None
 
 
+@lru_cache(maxsize=1)
 def _dynamic_instances() -> tuple[str, ...]:
     try:
-        response = httpx.get(INSTANCE_LIST_URL, timeout=12.0)
+        response = httpx.get(INSTANCE_LIST_URL, timeout=5.0)
         response.raise_for_status()
         urls = re.findall(r"https://[A-Za-z0-9.-]+", response.text)
         found = []
@@ -111,6 +114,10 @@ def _instance_candidates() -> tuple[str, ...]:
         if normalized and normalized not in values:
             values.append(normalized)
     return tuple(values)
+
+
+MAX_PIPED_METADATA_INSTANCES = 6
+PIPED_METADATA_TIMEOUT_SECONDS = 8.0
 
 
 class PipedYouTubeClient:
@@ -138,6 +145,22 @@ class PipedYouTubeClient:
             and item.get("url")
         ]
 
+    @staticmethod
+    def _fetch_payload(instance: str, video_id: str) -> tuple[str, dict]:
+        response = httpx.get(
+            f"{instance}/streams/{video_id}",
+            timeout=PIPED_METADATA_TIMEOUT_SECONDS,
+            headers={"Accept": "application/json"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("invalid JSON response")
+        videos = PipedYouTubeClient._video_candidates(payload)
+        if not videos:
+            raise RuntimeError("no 480p+ streams")
+        return instance, payload
+
     def _get_payload(self, video_id: str, preferred_instance: str | None = None) -> tuple[str, dict]:
         candidates = []
         if preferred_instance:
@@ -146,27 +169,25 @@ class PipedYouTubeClient:
             item for item in _instance_candidates()
             if item.rstrip("/") not in candidates
         )
+        candidates = candidates[:MAX_PIPED_METADATA_INSTANCES]
 
         errors = []
-        for instance in candidates:
-            try:
-                response = httpx.get(
-                    f"{instance}/streams/{video_id}",
-                    timeout=18.0,
-                    headers={"Accept": "application/json"},
-                )
-                response.raise_for_status()
-                payload = response.json()
-                if not isinstance(payload, dict):
-                    raise RuntimeError("invalid JSON response")
-                videos = self._video_candidates(payload)
-                if not videos:
-                    raise RuntimeError("no 480p+ streams")
-                return instance, payload
-            except Exception as exc:
-                errors.append(f"{instance}: {type(exc).__name__}: {exc}")
+        with ThreadPoolExecutor(max_workers=len(candidates) or 1) as executor:
+            futures = {
+                executor.submit(self._fetch_payload, instance, video_id): instance
+                for instance in candidates
+            }
+            for future in as_completed(futures):
+                instance = futures[future]
+                try:
+                    return future.result()
+                except Exception as exc:
+                    errors.append(f"{instance}: {type(exc).__name__}: {exc}")
 
-        raise RuntimeError("All Piped instances failed: " + " | ".join(errors))
+        raise RuntimeError(
+            "No responsive Piped instance returned a usable 480p+ stream within the timeout: "
+            + " | ".join(errors)
+        )
 
     def inspect(self, url: str) -> PipedInfo:
         video_id = youtube_video_id(url)
@@ -230,6 +251,7 @@ class PipedYouTubeClient:
             item for item in _instance_candidates()
             if item != info.instance_url
         )
+        instances = instances[:MAX_PIPED_METADATA_INSTANCES]
         last_error: Exception | None = None
 
         for instance in instances:
