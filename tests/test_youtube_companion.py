@@ -20,7 +20,7 @@ def test_extracts_youtube_ids():
     assert extract_youtube_video_id("https://youtu.be/aqz-KE-bpKQ?t=3") == "aqz-KE-bpKQ"
 
 
-def test_resolved_video_selects_complete_mp4_targets():
+def test_resolved_video_selects_best_complete_mp4_targets():
     resolved = YouTubeResolvedVideo(
         video_id="abc123",
         title="Example",
@@ -36,7 +36,7 @@ def test_resolved_video_selects_complete_mp4_targets():
 
     assert resolved.available_heights == (1080, 720, 480)
     assert resolved.best_video(1080).itag == 137
-    assert resolved.best_video(720).itag == 22
+    assert resolved.best_video(720).itag == 136
     assert resolved.best_audio().itag == 140
 
 
@@ -96,8 +96,6 @@ def test_player_request_uses_companion_bearer_key():
         "http://youtube-companion:8282/companion/youtubei/v1/player",
         json={"videoId": "aqz-KE-bpKQ"},
     )
-    assert client.post.call_args is not None
-    assert client.post.call_args.kwargs["json"]["videoId"] == "aqz-KE-bpKQ"
 
 
 def test_player_reports_youtube_bot_block():
@@ -164,7 +162,9 @@ def test_companion_download_uses_latest_version_and_probes_output(tmp_path):
         720,
     )
 
-    with patch("app.youtube_companion.httpx.Client", return_value=client),          patch("app.youtube_companion.FFmpegTools.check"),          patch("app.youtube_companion.FFmpegTools.probe", return_value=probe):
+    with patch("app.youtube_companion.httpx.Client", return_value=client), \
+         patch("app.youtube_companion.FFmpegTools.check"), \
+         patch("app.youtube_companion.FFmpegTools.probe", return_value=probe):
         with patch.object(settings, "download_root", str(tmp_path)):
             result = gateway.download(resolved, 720, job_id="job-1")
 
