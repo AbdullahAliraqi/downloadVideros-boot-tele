@@ -161,7 +161,7 @@ def test_analyzer_calls_yt_dlp_with_download_disabled():
 
     from app.video_analyzer import VideoMetadataAnalyzer
 
-    with patch("app.video_analyzer.YoutubeDL") as ydl_cls:
+    with patch("app.video_analyzer.yt_dlp.YoutubeDL") as ydl_cls:
         ydl = ydl_cls.return_value.__enter__.return_value
         ydl.extract_info.return_value = fake_info
 
