@@ -139,12 +139,12 @@ def test_480_remains_final_when_actual_size_still_exceeds_limit():
     assert outcome.result.exceeds_planning_limit is True
     downloader.download.assert_called_once()
 
-def test_youtube_uses_tunelio_when_configured():
+def test_youtube_uses_piped_backend():
     from unittest.mock import patch
-    from app.youtube_api import TunelioInfo
+    from app.youtube_api import PipedInfo
 
     youtube_client = Mock()
-    youtube_client.inspect.return_value = TunelioInfo(
+    youtube_client.inspect.return_value = PipedInfo(
         title="YouTube test",
         duration_seconds=30.0,
         available_heights=(1080, 720, 480),
@@ -159,8 +159,7 @@ def test_youtube_uses_tunelio_when_configured():
     coordinator = VideoDownloadCoordinator()
     coordinator.youtube_client = youtube_client
 
-    with patch("app.download_coordinator.settings.tunelio_api_key", "tnl_test"):
-        outcome = coordinator.download(
+    outcome = coordinator.download(
             "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
             job_id="job-youtube",
         )
