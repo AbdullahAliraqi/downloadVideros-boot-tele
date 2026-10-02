@@ -58,7 +58,7 @@ class VideoDownloadEngine:
             "overwrites": True,
             "js_runtimes": {"node": {}},
             "extractor_args": {
-                "youtube": {"player_client": ["mweb"]},
+                "youtube": {"player_client": ["android_vr", "web_embedded"]},
                 "youtubepot-bgutilhttp": {"base_url": "http://127.0.0.1:4416"},
             },
         }
