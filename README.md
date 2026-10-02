@@ -42,19 +42,24 @@ Real values for `BOT_TOKEN`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, and `WEBHOO
 
 ## Blitz Telegram upload path
 
-Telegram's official cloud Bot API currently limits bot uploads to 50 MB. Telegram's local Bot API server raises the upload limit to 2000 MB and requires an `api_id` and `api_hash`.
+Telegram's cloud Bot API is limited to 50 MB for bot uploads. Telegram's Local Bot API server allows uploads up to 2000 MB and requires your own `api_id` and `api_hash`.
 
-For the 2000 MB target on Blitz, use two apps:
+This repository already contains the Local Bot API service in `docker-compose.yml`. On blitz.cloud, deploy the repository as a GitHub/Compose project rather than deploying only the root `Dockerfile`.
 
-1. Keep this downloader app on Blitz.
-2. Deploy the official-source-compatible `aiogram/telegram-bot-api:latest` Docker image as a second Blitz app.
-3. In the Bot API app set `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, and `TELEGRAM_LOCAL=1`.
-4. In this downloader app set:
-   `TELEGRAM_API_BASE_URL=https://<your-bot-api-app>.blitz.cloud`
-   `TELEGRAM_LOCAL_MODE=true`
-   `TELEGRAM_MAX_UPLOAD_MB=2000`
-   Keep `WEBHOOK_BASE_URL=https://abdullahaliraqi.blitz.cloud` (or your current downloader address).
+Blitz can run the services in a Compose project as separate parts while keeping their service-to-service addresses. The `bot` service uses `app.local_runner` and talks to the `telegram-bot-api` service at `http://telegram-bot-api:8081`. The Compose file already enables `TELEGRAM_LOCAL=1` and sets the upload target to 2000 MB.
 
-The downloader continues using its normal HTTPS webhook. The local Bot API server is the component that talks to Telegram and exposes the 2000 MB local-mode upload capability.
+Set these environment variables in the Blitz project:
 
-The cloud 50 MB limit is a Telegram platform limit, not a Blitz limit.
+```
+BOT_TOKEN=<your existing bot token>
+TELEGRAM_API_ID=<your Telegram api_id>
+TELEGRAM_API_HASH=<your Telegram api_hash>
+```
+
+Do not set `TELEGRAM_API_BASE_URL=https://api.telegram.org` for the Compose deployment; the Compose service sets it internally to `http://telegram-bot-api:8081`.
+
+Obtain `api_id` and `api_hash` from https://my.telegram.org. They are separate from the bot token.
+
+After the Compose deployment is online, verify the `telegram-bot-api` part is healthy and the `bot` part is running. Then the bot uses Telegram Local Bot API for files up to the 2000 MB target.
+
+The 50 MB cloud limit is a Telegram platform limit, not a Blitz limit.
