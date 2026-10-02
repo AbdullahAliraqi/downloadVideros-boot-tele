@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-from yt_dlp import YoutubeDL
-from yt_dlp.networking.impersonate import ImpersonateTarget
+import yt_dlp
 
 from .config import settings
 
@@ -107,7 +106,7 @@ class VideoMetadataAnalyzer:
         if settings.ytdlp_proxy_url:
             options["proxy"] = settings.ytdlp_proxy_url
         if is_youtube:
-            options["impersonate"] = ImpersonateTarget("chrome")
+            options["impersonate"] = yt_dlp.networking.impersonate.ImpersonateTarget.from_str("chrome")
             options["extractor_args"] = {
                 "youtube": {
                     "player_client": [
@@ -122,7 +121,7 @@ class VideoMetadataAnalyzer:
                 },
             }
 
-        with YoutubeDL(options) as ydl:
+        with yt_dlp.YoutubeDL(options) as ydl:
             info = ydl.extract_info(url, download=False)
 
         formats = [_parse_format(item) for item in (info.get("formats") or [])]
