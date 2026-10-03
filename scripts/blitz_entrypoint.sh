@@ -9,15 +9,23 @@ if [ "${BLITZ_SINGLE_CONTAINER:-true}" != "true" ]; then
   exec "$@"
 fi
 
-: "${TELEGRAM_API_ID:?TELEGRAM_API_ID must be set}"
-: "${TELEGRAM_API_HASH:?TELEGRAM_API_HASH must be set}"
 : "${BOT_TOKEN:?BOT_TOKEN must be set}"
 
-# Blitz runs this repository as one app/container. Keep internal services on loopback.
-export TELEGRAM_LOCAL_MODE=true
-export TELEGRAM_MAX_UPLOAD_MB=2000
-export TELEGRAM_API_BASE_URL=http://127.0.0.1:8081
+# Blitz runs this repository as one app/container. Use the Telegram Local Bot
+# API only when its required API credentials are actually configured.
 export YOUTUBE_COMPANION_BASE_URL=http://127.0.0.1:8282/companion
+
+if [ -n "${TELEGRAM_API_ID:-}" ] && [ -n "${TELEGRAM_API_HASH:-}" ]; then
+  export TELEGRAM_LOCAL_MODE=true
+  export TELEGRAM_MAX_UPLOAD_MB=2000
+  export TELEGRAM_API_BASE_URL=http://127.0.0.1:8081
+  log "Telegram Local Bot API enabled."
+else
+  export TELEGRAM_LOCAL_MODE=false
+  export TELEGRAM_MAX_UPLOAD_MB=50
+  export TELEGRAM_API_BASE_URL="${TELEGRAM_API_BASE_URL:-https://api.telegram.org}"
+  log "Telegram API credentials are not configured; using Telegram Cloud Bot API (50 MB limit)."
+fi
 
 mkdir -p /data/telegram-bot-api /data/youtube-companion /data/youtubei.js
 umask 077
@@ -40,6 +48,11 @@ if [ "${#secret}" -ne 16 ]; then
 fi
 
 export YOUTUBE_COMPANION_SECRET_KEY="$secret"
+
+if [ "${BLITZ_PREFLIGHT_ONLY:-false}" = "true" ]; then
+  log "Blitz preflight complete: Telegram mode and Companion secret are valid."
+  exit 0
+fi
 
 telegram-bot-api \
   --dir=/data/telegram-bot-api \
