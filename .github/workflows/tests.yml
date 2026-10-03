@@ -29,6 +29,8 @@ jobs:
         run: |
           docker run --rm -e BLITZ_SINGLE_CONTAINER=false telegram-video-bot-blitz:test sh -c 'test -x /usr/local/bin/telegram-bot-api && test -x /usr/local/bin/invidious_companion'
           docker run --rm -e BLITZ_SINGLE_CONTAINER=false telegram-video-bot-blitz:test sh -n /app/scripts/blitz_entrypoint.sh
+          docker run --rm -e BLITZ_SINGLE_CONTAINER=false telegram-video-bot-blitz:test sh -c 'ldd /usr/local/bin/telegram-bot-api 2>&1 | grep -q "not found" && exit 1 || true'
+          docker run --rm -e BLITZ_SINGLE_CONTAINER=false telegram-video-bot-blitz:test telegram-bot-api --help >/dev/null
       - name: Verify Telegram credential compatibility
         run: |
           docker run --rm -e BLITZ_PREFLIGHT_ONLY=true -e BOT_TOKEN=test-token telegram-video-bot-blitz:test true
