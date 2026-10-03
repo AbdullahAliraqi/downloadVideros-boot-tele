@@ -47,7 +47,7 @@ Set these environment variables in the Blitz app:
 
 Do not set `TELEGRAM_API_BASE_URL` to `https://api.telegram.org` for the Blitz production image; the image provides the Local Bot API internally.
 
-Blitz applies environment-variable changes on the next restart. Persistent folders survive restarts when they are among the app's kept folders. Configure the detected `/data/*` folders in Advanced settings when needed. citeturn886786search1
+Blitz applies environment-variable changes on the next restart. Persistent folders survive restarts when they are among the app's kept folders. Configure the detected `/data/*` folders in Advanced settings when needed.
 
 ## YouTube
 
@@ -63,7 +63,7 @@ A successful `/health` response is not a YouTube success signal. The real gate i
 6. The actual file size stays within the 2000 MB planning limit or the documented quality fallback occurs.
 7. The Local Telegram Bot API sends the file.
 
-The Telegram Local Bot API binary is taken from the official aiogram container and listens only on loopback inside the Blitz container. The official image documents local mode and port 8081. citeturn725909search0turn725909search1
+The Telegram Local Bot API binary is taken from the official aiogram container and listens only on loopback inside the Blitz container. The official image documents local mode and port 8081.
 
 ## Local Docker Compose
 
