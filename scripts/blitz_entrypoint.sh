@@ -56,14 +56,17 @@ if [ "${BLITZ_PREFLIGHT_ONLY:-false}" = "true" ]; then
   exit 0
 fi
 
-telegram-bot-api \
-  --dir=/data/telegram-bot-api \
-  --temp-dir=/tmp/telegram-bot-api \
-  --http-port=8081 \
-  --http-stat-port=8082 \
-  --http-ip-address=127.0.0.1 \
-  --local &
-telegram_pid=$!
+telegram_pid=""
+if [ "$TELEGRAM_LOCAL_MODE" = "true" ]; then
+  telegram-bot-api \
+    --dir=/data/telegram-bot-api \
+    --temp-dir=/tmp/telegram-bot-api \
+    --http-port=8081 \
+    --http-stat-port=8082 \
+    --http-ip-address=127.0.0.1 \
+    --local &
+  telegram_pid=$!
+fi
 
 HOST=127.0.0.1 \
 PORT=8282 \
