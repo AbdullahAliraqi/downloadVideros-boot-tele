@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Any
 from urllib.parse import urlparse
 
@@ -9,6 +10,8 @@ from yt_dlp.utils import DownloadError
 
 from .config import settings
 from .ydl_config import YOUTUBE_FALLBACK_PROFILES, build_ydl_opts
+
+logger = logging.getLogger(__name__)
 
 MAX_VIDEO_SIZE_MB = 50
 MAX_PLANNING_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024
@@ -148,7 +151,7 @@ class VideoMetadataAnalyzer:
                 last_error = exc
                 if not _is_youtube(url):
                     raise
-                logger = __import__("logging").getLogger(__name__)
+                
                 logger.warning(
                     "yt-dlp extraction profile %s failed: %s",
                     name,
