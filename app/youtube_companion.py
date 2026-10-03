@@ -193,7 +193,12 @@ class YouTubeCompanionGateway:
         timeout_seconds: float = 45.0,
         readiness_timeout_seconds: float = 90.0,
     ) -> None:
-        self.base_url = (base_url or settings.youtube_companion_base_url).rstrip("/")
+        raw_base_url = (base_url or settings.youtube_companion_base_url).strip().rstrip("/")
+        if raw_base_url and "://" not in raw_base_url:
+            raw_base_url = f"http://{raw_base_url}"
+        if raw_base_url and not raw_base_url.endswith("/companion"):
+            raw_base_url = f"{raw_base_url}/companion"
+        self.base_url = raw_base_url
         self.secret_key = secret_key or settings.youtube_companion_secret_key
         self.timeout_seconds = timeout_seconds
         self.readiness_timeout_seconds = readiness_timeout_seconds
@@ -205,7 +210,7 @@ class YouTubeCompanionGateway:
             )
         if len(self.secret_key) != 16:
             raise YouTubeCompanionConfigurationError(
-                "YOUTUBE_COMPANION_SECRET_KEY must contain exactly 16 characters"
+                f"YOUTUBE_COMPANION_SECRET_KEY must contain exactly 16 characters (received {len(self.secret_key)})"
             )
 
     def _headers(self) -> dict[str, str]:

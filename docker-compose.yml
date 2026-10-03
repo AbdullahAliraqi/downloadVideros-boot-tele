@@ -71,7 +71,7 @@ services:
       YOUTUBE_PROXY_URL: ${YOUTUBE_PROXY_URL:-}
       YTDLP_COOKIES_FILE: ${YTDLP_COOKIES_FILE:-}
       YOUTUBE_COMPANION_BASE_URL: http://youtube-companion:8282/companion
-      YOUTUBE_COMPANION_SECRET_KEY: ${YOUTUBE_COMPANION_SECRET_KEY:-}
+      YOUTUBE_COMPANION_SECRET_KEY: ${YOUTUBE_COMPANION_SECRET_KEY:?Set YOUTUBE_COMPANION_SECRET_KEY (exactly 16 chars) in .env}
     volumes:
       - telegram_bot_downloads:/data/downloads
       - ${YTDLP_COOKIES_DIR:-./.secrets}:/run/secrets:ro
