@@ -1,27 +1,38 @@
-# Telegram Video Bot — Repository State
+# Telegram Video Bot — Current Repository State
 
-This repository now contains the source files recovered from the project's v18 source overlay.
+## Production architecture
 
-Recovered source files:
-- `render.yaml`
-- `tests/test_url_validator.py`
-- `tests/test_v18_features.py`
-- `tests/test_main.py`
-- `tests/test_download_coordinator.py`
-- `tests/test_video_analyzer.py`
-- `app/video_analyzer.py`
-- `app/reddit_support.py`
-- `app/url_validator.py`
-- `app/main.py`
-- `app/download_coordinator.py`
-- `app/local_runner.py`
+The Blitz target is a single lightweight Python container:
 
-Known runtime requirements/configuration from the project logs:
-- Python 3.14
-- FFmpeg / FFprobe
-- yt-dlp with YouTube EJS support
-- Local Telegram Bot API for the 2000 MB upload target
-- Six supported platforms: YouTube, Facebook, Instagram, TikTok, X, Reddit
-- Quality policy: start at highest supported target (1080p, then 720p, then 480p) and fall back after an actual size check when the 2000 MB limit is exceeded.
+- Flask provides the public HTTP service.
+- python-telegram-bot handles Telegram updates.
+- Telegram webhook delivery is used; no long polling runner is included.
+- yt-dlp is the only media acquisition engine.
+- FFmpeg/FFprobe are installed as system packages for media merging and validation.
+- Telegram Cloud Bot API is used, with a 50 MB upload limit.
+- Optional Netscape-format cookies can be supplied to yt-dlp.
 
-Important: this file records the recovered source set; packaging/runtime files not present in the source overlay (for example an exact Dockerfile/requirements snapshot) are intentionally not invented here.
+## Removed deployment blockers
+
+The repository no longer builds or bundles:
+
+- TDLib / Telegram Local Bot API
+- CMake / native C++ Telegram API compilation
+- Invidious Companion
+- Camoufox
+- Playwright
+- bgutil POT provider
+- custom Telegram polling runtime
+- Piped YouTube runtime
+
+This removes the native C++ build stage that exhausted Blitz builder memory and removes the browser-backed YouTube Companion process.
+
+## Quality policy
+
+The source is inspected for 1080p, 720p, and 480p support. The highest source-supported target is downloaded first. The actual output size is checked after download. When it exceeds 50 MB, the next lower supported target is attempted. If 480p still exceeds 50 MB, the bot does not upload the file.
+
+## Blitz verification boundary
+
+CI can prove that the Python test suite, Docker build, FFmpeg availability, Gunicorn WSGI import, Compose configuration, webhook validation, and runtime files are correct.
+
+CI cannot prove that a particular live YouTube URL succeeds from Blitz. That requires a real deployed test and, when YouTube requires authentication, a valid cookie file supplied to the running app.
