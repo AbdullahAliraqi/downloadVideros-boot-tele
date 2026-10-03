@@ -23,3 +23,9 @@ jobs:
           TELEGRAM_API_HASH: test-hash
           YOUTUBE_COMPANION_SECRET_KEY: A1b2C3d4E5f6G7h8
         run: docker compose config --quiet
+      - name: Build Blitz image
+        run: docker build --platform linux/amd64 -t telegram-video-bot-blitz:test .
+      - name: Verify bundled service binaries and entrypoint
+        run: |
+          docker run --rm -e BLITZ_SINGLE_CONTAINER=false telegram-video-bot-blitz:test sh -c 'test -x /usr/local/bin/telegram-bot-api && test -x /usr/local/bin/invidious_companion'
+          docker run --rm -e BLITZ_SINGLE_CONTAINER=false telegram-video-bot-blitz:test sh -n /app/scripts/blitz_entrypoint.sh
