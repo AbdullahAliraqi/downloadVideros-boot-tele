@@ -77,7 +77,7 @@ class VideoDownloadEngine:
         except DownloadError as exc:
             message = str(exc)
             lowered = message.lower()
-            if "max filesize" in lowered or "larger than the max" in lowered:
+            if "max-filesize" in lowered or "max filesize" in lowered or "larger than the max" in lowered or "file is larger than" in lowered:
                 raise DownloadTooLargeError(
                     f"Source/output exceeded the Telegram 50 MB guard: {message}"
                 ) from exc
