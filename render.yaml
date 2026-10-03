@@ -32,6 +32,20 @@ services:
         value: ffprobe
       - key: DOWNLOAD_ROOT
         value: /tmp/telegram-video-downloads
+      - key: YOUTUBE_PROXY_URL
+        sync: false
+      - key: YOUTUBE_IPV6_BLOCK
+        sync: false
+      - key: YOUTUBE_COMPANION_SECRET_KEY
+        fromService:
+          name: youtube-companion
+          type: pserv
+          envVarKey: YOUTUBE_COMPANION_SECRET_KEY
+      - key: YOUTUBE_COMPANION_BASE_URL
+        fromService:
+          name: youtube-companion
+          type: pserv
+          property: hostport
 
   # Local Telegram Bot API server for the 2000 MB upload target.
   - type: pserv
@@ -55,3 +69,50 @@ services:
       name: telegram-bot-api-data
       mountPath: /var/lib/telegram-bot-api
       sizeGB: 10
+
+  # Internal YouTube acquisition gateway.
+  - type: pserv
+    name: youtube-companion
+    runtime: image
+    plan: 0.5c-512mb
+    image:
+      url: quay.io/invidious/invidious-companion:latest
+    envVars:
+      - key: HOST
+        value: "0.0.0.0"
+      - key: PORT
+        value: "8282"
+      - key: SERVER_BASE_PATH
+        value: /companion
+      - key: YOUTUBE_COMPANION_SECRET_KEY
+        sync: false
+      - key: SERVER_VERIFY_REQUESTS
+        value: "false"
+      - key: CACHE_ENABLED
+        value: "true"
+      - key: CACHE_DIRECTORY
+        value: /var/tmp/youtubei.js
+      - key: JOBS_YOUTUBE_SESSION_PO_TOKEN_ENABLED
+        value: "true"
+      - key: JOBS_YOUTUBE_SESSION_FREQUENCY
+        value: "*/5 * * * *"
+      - key: NETWORKING_FETCH_TIMEOUT_MS
+        value: "30000"
+      - key: NETWORKING_FETCH_RETRY_ENABLED
+        value: "true"
+      - key: NETWORKING_FETCH_RETRY_TIMES
+        value: "2"
+      - key: NETWORKING_FETCH_RETRY_INITIAL_DEBOUNCE
+        value: "500"
+      - key: NETWORKING_FETCH_RETRY_DEBOUNCE_MULTIPLIER
+        value: "2"
+      - key: PROXY
+        fromService:
+          name: telegram-video-downloader
+          type: web
+          envVarKey: YOUTUBE_PROXY_URL
+      - key: NETWORKING_IPV6_BLOCK
+        fromService:
+          name: telegram-video-downloader
+          type: web
+          envVarKey: YOUTUBE_IPV6_BLOCK
