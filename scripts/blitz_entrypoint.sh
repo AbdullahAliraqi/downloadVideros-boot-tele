@@ -14,6 +14,7 @@ fi
 # Blitz runs this repository as one app/container. Use the Telegram Local Bot
 # API only when its required API credentials are actually configured.
 export YOUTUBE_COMPANION_BASE_URL=http://127.0.0.1:8282/companion
+required_ports="8282"
 
 if [ -n "${TELEGRAM_API_ID:-}" ] && [ -n "${TELEGRAM_API_HASH:-}" ]; then
   export TELEGRAM_LOCAL_MODE=true
