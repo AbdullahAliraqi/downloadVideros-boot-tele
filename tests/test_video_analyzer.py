@@ -243,7 +243,7 @@ def test_analyzer_does_not_use_companion_or_browser_runtime():
         VideoMetadataAnalyzer().analyze("https://www.youtube.com/watch?v=abc")
 
         opts = ydl_cls.call_args.args[0]
-        assert "extractor_args" not in opts
+        assert opts["extractor_args"]["youtube"]["player_client"] == ["web"]
         assert "js_runtimes" not in opts
         assert "impersonate" not in opts
 

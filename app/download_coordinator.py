@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from .download_engine import DownloadResult, VideoDownloadEngine
+from .download_engine import DownloadResult, DownloadTooLargeError, VideoDownloadEngine
 from .url_validator import platform_for_url
 from .video_analyzer import (
     DownloadPlan,
@@ -81,11 +81,22 @@ class VideoDownloadCoordinator:
 
         while True:
             attempts.append(current_plan.target_height)
-            result = self.downloader.download(
-                url,
-                current_plan,
-                job_id=job_id,
-            )
+            try:
+                result = self.downloader.download(
+                    url,
+                    current_plan,
+                    job_id=job_id,
+                )
+            except DownloadTooLargeError:
+                next_plan = self._next_plan(
+                    analysis,
+                    current_plan.target_height,
+                    supported_heights,
+                )
+                if next_plan is None:
+                    raise
+                current_plan = next_plan
+                continue
 
             if result.actual_size <= self.max_size_bytes:
                 return DownloadOutcome(
