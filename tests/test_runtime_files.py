@@ -10,6 +10,7 @@ def test_lightweight_runtime_files_exist() -> None:
         "app/download_engine.py",
         "app/download_coordinator.py",
         "app/video_analyzer.py",
+        "app/ydl_config.py",
         "app/video_service.py",
         "wsgi.py",
         "Dockerfile",
