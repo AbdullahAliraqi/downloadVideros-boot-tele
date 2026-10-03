@@ -1,0 +1,2 @@
+# Optional Netscape-format cookies for yt-dlp.
+# Keep real authentication cookies out of Git history.
