@@ -5,32 +5,40 @@ on:
   pull_request:
 
 jobs:
-  pytest:
+  verify:
     runs-on: ubuntu-latest
     env:
       PYTHONPATH: .
+      TELEGRAM_RUNTIME_AUTOSTART: "false"
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
-      - run: pip install -r requirements.txt
-      - run: pytest -q
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install "pytest>=8,<9"
+
+      - name: Run tests
+        run: pytest -q
+
       - name: Validate Docker Compose
         env:
           BOT_TOKEN: test-token
-          TELEGRAM_API_ID: "123456"
-          TELEGRAM_API_HASH: test-hash
-          YOUTUBE_COMPANION_SECRET_KEY: A1b2C3d4E5f6G7h8
+          WEBHOOK_BASE_URL: https://example.test
         run: docker compose config --quiet
+
       - name: Build Blitz image
         run: docker build --platform linux/amd64 -t telegram-video-bot-blitz:test .
-      - name: Verify bundled service binaries and entrypoint
+
+      - name: Verify lightweight runtime
         run: |
-          docker run --rm -e BLITZ_SINGLE_CONTAINER=false telegram-video-bot-blitz:test sh -c 'test -x /usr/local/bin/telegram-bot-api && test -x /usr/local/bin/invidious_companion'
-          docker run --rm -e BLITZ_SINGLE_CONTAINER=false telegram-video-bot-blitz:test sh -n /app/scripts/blitz_entrypoint.sh
-          docker run --rm -e BLITZ_SINGLE_CONTAINER=false telegram-video-bot-blitz:test sh -c 'ldd /usr/local/bin/telegram-bot-api 2>&1 | grep -q "not found" && exit 1 || true'
-          docker run --rm -e BLITZ_SINGLE_CONTAINER=false telegram-video-bot-blitz:test telegram-bot-api --help >/dev/null
-      - name: Verify Telegram credential compatibility
-        run: |
-          docker run --rm -e BLITZ_PREFLIGHT_ONLY=true -e BOT_TOKEN=test-token telegram-video-bot-blitz:test true
+          docker run --rm telegram-video-bot-blitz:test ffmpeg -version
+          docker run --rm telegram-video-bot-blitz:test ffprobe -version
+          docker run --rm telegram-video-bot-blitz:test gunicorn --check-config wsgi:app
+          docker run --rm telegram-video-bot-blitz:test sh -c 'test -f /app/cookies.txt'
+          docker run --rm telegram-video-bot-blitz:test sh -c '! test -x /usr/local/bin/telegram-bot-api'
+          docker run --rm telegram-video-bot-blitz:test sh -c '! test -e /opt/camoufox'

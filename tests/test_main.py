@@ -1,102 +1,69 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
-from fastapi.testclient import TestClient
-
-from app.main import HELP_TEXT, START_MENU, START_TEXT, app
+from app.main import HELP_TEXT, START_MENU, START_MARKUP, START_TEXT, app
 
 
-def test_supported_url_is_acknowledged_without_waiting_for_analysis():
-    payload = {
-        "message": {
-            "chat": {"id": 123},
-            "text": "https://www.youtube.com/watch?v=abc",
-        }
-    }
+def test_root_returns_blitz_health_message():
+    client = app.test_client()
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == "Bot Service is Active"
 
-    with patch("app.main.settings.bot_token", "token", create=True), patch(
-        "app.main.settings.webhook_secret", ""
-    ), patch("app.main.send_message", new_callable=AsyncMock) as send_message, patch(
-        "app.main.process_download_and_send", new_callable=AsyncMock
-    ) as process_task:
-        client = TestClient(app)
-        response = client.post("/webhook", json=payload)
+
+def test_health_returns_ok():
+    client = app.test_client()
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "ok"}
+
+
+def test_webhook_rejects_invalid_secret():
+    from app.config import settings
+
+    with patch.object(settings, "webhook_secret", "secret"):
+        client = app.test_client()
+        response = client.post(
+            "/webhook",
+            json={"update_id": 1, "message": {}},
+            headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"},
+        )
+    assert response.status_code == 403
+
+
+def test_webhook_queues_valid_update():
+    from app.main import runtime
+
+    with patch.object(runtime, "submit_update") as submit:
+        client = app.test_client()
+        response = client.post(
+            "/webhook",
+            json={
+                "update_id": 1,
+                "message": {
+                    "message_id": 1,
+                    "chat": {"id": 123, "type": "private"},
+                    "text": "/start",
+                },
+            },
+        )
 
     assert response.status_code == 200
-    assert response.json() == {"ok": True}
-    assert send_message.await_count >= 1
-    process_task.assert_awaited_once()
+    assert response.get_data(as_text=True) == "OK"
+    submit.assert_called_once()
 
 
-def test_start_keyboard_contains_home_start_button():
-    assert any(
-        button.get("text") == "🏠 Start"
-        for row in START_MENU["keyboard"]
-        for button in row
-    )
+def test_menu_matches_documented_buttons():
+    flattened = [button for row in START_MENU for button in row]
+    assert "🏠 Start" in flattened
+    assert "🎬 تنزيل فيديو" in flattened
+    assert "🌐 المنصات المدعومة" in flattened
+    assert "ℹ️ طريقة الاستخدام" in flattened
+    assert START_MARKUP.to_dict()["resize_keyboard"] is True
 
 
-def test_handle_update_home_start_sends_start_menu():
-    import asyncio
-
-    from app.main import handle_update
-
-    update = {"message": {"chat": {"id": 123}, "text": "🏠 Start"}}
-    with patch("app.main.send_message", new_callable=AsyncMock) as send_message:
-        asyncio.run(handle_update(update))
-
-    send_message.assert_awaited_once_with(123, START_TEXT, reply_markup=START_MENU)
-
-
-def test_handle_update_start_sends_start_menu():
-    import asyncio
-
-    from app.main import handle_update
-
-    update = {"message": {"chat": {"id": 123}, "text": "/start"}}
-    with patch("app.main.send_message", new_callable=AsyncMock) as send_message:
-        asyncio.run(handle_update(update))
-
-    send_message.assert_awaited_once_with(123, START_TEXT, reply_markup=START_MENU)
-
-
-def test_help_button_sends_help_text():
-    import asyncio
-
-    from app.main import handle_update
-
-    update = {"message": {"chat": {"id": 123}, "text": "ℹ️ طريقة الاستخدام"}}
-    with patch("app.main.send_message", new_callable=AsyncMock) as send_message:
-        asyncio.run(handle_update(update))
-
-    send_message.assert_awaited_once_with(123, HELP_TEXT, reply_markup=START_MENU)
-
-
-def test_process_download_reports_configured_limit(tmp_path):
-    import asyncio
-    from pathlib import Path
-    from unittest.mock import Mock, patch
-    from app.download_engine import DownloadResult
-    from app.media_tools import MediaProbeResult
-    from app.telegram_api import TelegramFileTooLargeError
-    from app.main import process_download_and_send
-
-    video = tmp_path / "too-large.mp4"
-    video.write_bytes(b"x")
-    result = DownloadResult(
-        job_id="job-1", file_path=video, target_height=480, selected_format="398+140",
-        estimated_size=None, actual_size=2100 * 1024 * 1024, exceeds_planning_limit=True,
-        probe=MediaProbeResult(video, 2100 * 1024 * 1024, 10.0),
-    )
-    with patch("app.main.settings.download_root", str(tmp_path)), patch(
-        "app.main.send_message", new_callable=AsyncMock
-    ) as send_message, patch(
-        "app.main.coordinator.download", new=Mock(return_value=Mock(result=result, fallback_count=1, attempted_heights=(1080,480), available_heights=(1080,480)))
-    ), patch(
-        "app.main.send_video", new=AsyncMock(side_effect=TelegramFileTooLargeError(video, 2100 * 1024 * 1024, 2000 * 1024 * 1024))
-    ), patch("app.main.settings.telegram_local_mode", True), patch(
-        "app.main.settings.telegram_max_upload_mb", 2000
-    ):
-        asyncio.run(process_download_and_send(123, "https://example.com/video", "job-1"))
-
-    texts = [call.args[1] for call in send_message.await_args_list if len(call.args) > 1]
-    assert any("2000 MB" in text for text in texts)
+def test_help_text_mentions_50_mb_limit():
+    assert "50 MB" in HELP_TEXT
+    assert "1080p" in HELP_TEXT
+    assert "720p" in HELP_TEXT
+    assert "480p" in HELP_TEXT
+    assert "Reddit" in START_TEXT

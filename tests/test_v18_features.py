@@ -1,7 +1,4 @@
-from unittest.mock import Mock
-
 from app.main import START_MENU, SUPPORTED_PLATFORMS_TEXT
-from app.reddit_support import RedditResolvedVideo, RedditVariant
 from app.url_validator import is_supported_url, platform_for_url
 
 
@@ -19,28 +16,14 @@ def test_six_supported_platforms_are_accepted():
         assert platform_for_url(url) == platform
 
 
-def test_start_button_is_visible_and_platform_text_lists_reddit():
-    assert any(
-        button.get("text") == "🏠 Start"
-        for row in START_MENU["keyboard"]
-        for button in row
-    )
+def test_start_menu_contains_all_expected_actions():
+    flattened = [button for row in START_MENU for button in row]
+    assert "🏠 Start" in flattened
+    assert "🎬 تنزيل فيديو" in flattened
+    assert "🌐 المنصات المدعومة" in flattened
+    assert "ℹ️ طريقة الاستخدام" in flattened
     assert "Reddit" in SUPPORTED_PLATFORMS_TEXT
 
 
-def test_reddit_resolution_selection():
-    resolved = RedditResolvedVideo(
-        title="test",
-        duration_seconds=10,
-        variants=(
-            RedditVariant(1080, 1920, "https://v.redd.it/id/DASH_1080.mp4"),
-            RedditVariant(720, 1280, "https://v.redd.it/id/DASH_720.mp4"),
-            RedditVariant(480, 854, "https://v.redd.it/id/DASH_480.mp4"),
-        ),
-        audio_url="https://v.redd.it/id/DASH_AUDIO_128.mp4",
-    )
-
-    assert resolved.available_heights == (1080, 720, 480)
-    assert resolved.variant_for(1080).url.endswith("DASH_1080.mp4")
-    assert resolved.variant_for(720).url.endswith("DASH_720.mp4")
-    assert resolved.variant_for(480).url.endswith("DASH_480.mp4")
+def test_unknown_domain_is_not_supported():
+    assert not is_supported_url("https://example.com/video")

@@ -37,8 +37,8 @@ def fmt(
     }
 
 
-def test_limit_is_2000_mb():
-    assert MAX_PLANNING_SIZE_BYTES == 2000 * 1024 * 1024
+def test_limit_is_50_mb():
+    assert MAX_PLANNING_SIZE_BYTES == 50 * 1024 * 1024
 
 
 def test_prefers_highest_supported_1080_even_when_estimate_exceeds_2000_mb():
@@ -172,25 +172,26 @@ def test_analyzer_calls_yt_dlp_with_download_disabled():
         opts = ydl_cls.call_args.args[0]
         assert opts["skip_download"] is True
         assert opts["noplaylist"] is True
-        assert opts["js_runtimes"] == {"node": {}}
         ydl.extract_info.assert_called_once_with("https://example.com/video", download=False)
         assert result["id"] == "abc"
         assert result["available_resolutions"] == ()
 
-def test_analyzer_uses_configured_youtube_cookies():
+def test_analyzer_uses_configured_youtube_cookies(tmp_path):
     fake_info = {
         "id": "abc",
         "title": "Example",
         "duration": 12,
         "formats": [],
     }
+    cookiefile = tmp_path / "youtube-cookies.txt"
+    cookiefile.write_text("# Netscape HTTP Cookie File\\nexample\\tTRUE\\t/\\tFALSE\\t0\\tsession\\tvalue\\n")
 
     from app.video_analyzer import VideoMetadataAnalyzer
 
     with patch.object(
         settings,
         "ytdlp_cookies_file",
-        "/run/secrets/youtube-cookies.txt",
+        str(cookiefile),
     ), patch("app.video_analyzer.yt_dlp.YoutubeDL") as ydl_cls:
         ydl = ydl_cls.return_value.__enter__.return_value
         ydl.extract_info.return_value = fake_info
@@ -200,7 +201,7 @@ def test_analyzer_uses_configured_youtube_cookies():
         )
 
         opts = ydl_cls.call_args.args[0]
-        assert opts["cookiefile"] == "/run/secrets/youtube-cookies.txt"
+        assert opts["cookiefile"] == str(cookiefile)
 
 
 def test_analyzer_prefers_youtube_specific_proxy():
@@ -225,7 +226,7 @@ def test_analyzer_prefers_youtube_specific_proxy():
         assert opts["proxy"] == "socks5://youtube-proxy"
 
 
-def test_analyzer_uses_yt_dlp_default_youtube_clients():
+def test_analyzer_does_not_use_companion_or_browser_runtime():
     fake_info = {
         "id": "abc",
         "title": "Example",
@@ -242,7 +243,8 @@ def test_analyzer_uses_yt_dlp_default_youtube_clients():
         VideoMetadataAnalyzer().analyze("https://www.youtube.com/watch?v=abc")
 
         opts = ydl_cls.call_args.args[0]
-        assert "youtube" not in opts["extractor_args"]
+        assert "extractor_args" not in opts
+        assert "js_runtimes" not in opts
         assert "impersonate" not in opts
 
 

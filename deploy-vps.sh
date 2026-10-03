@@ -16,7 +16,7 @@ cd "$APP_DIR"
 
 if [ ! -f .env ]; then
   cp .env.example .env
-  echo "Created $APP_DIR/.env. Fill in the Telegram credentials, then rerun this script."
+  echo "Created $APP_DIR/.env. Set BOT_TOKEN and WEBHOOK_BASE_URL, then rerun this script."
   exit 0
 fi
 

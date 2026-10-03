@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
 
 import yt_dlp
 
 from .config import settings
 from .media_tools import FFmpegTools, MediaProbeResult
-from .url_validator import platform_for_url
 from .video_analyzer import DownloadPlan
 
 
@@ -32,6 +30,13 @@ class VideoDownloadEngine:
         ffprobe_path: str | None = None,
     ) -> None:
         self.ffmpeg = FFmpegTools(ffmpeg_path, ffprobe_path)
+
+    @staticmethod
+    def _cookiefile() -> str | None:
+        path = Path(settings.ytdlp_cookies_file)
+        if path.is_file() and path.stat().st_size > 0:
+            return str(path)
+        return None
 
     def download(
         self,
@@ -58,22 +63,22 @@ class VideoDownloadEngine:
             "no_warnings": True,
             "noplaylist": True,
             "overwrites": True,
-            "js_runtimes": {"node": {}},
-            "extractor_args": {
-                "youtubepot-bgutilhttp": {"base_url": "http://127.0.0.1:4416"},
-            },
         }
 
-        if platform_for_url(url) == "YouTube":
-            if settings.youtube_proxy_url:
+        cookiefile = self._cookiefile()
+        if cookiefile:
+            options["cookiefile"] = cookiefile
+
+        if settings.youtube_proxy_url:
+            from .url_validator import platform_for_url
+            if platform_for_url(url) == "YouTube":
                 options["proxy"] = settings.youtube_proxy_url
-            if settings.ytdlp_cookies_file:
-                options["cookiefile"] = settings.ytdlp_cookies_file
         elif settings.ytdlp_proxy_url:
             options["proxy"] = settings.ytdlp_proxy_url
 
         with yt_dlp.YoutubeDL(options) as ydl:
             result_code = ydl.download([url])
+
         if result_code not in (None, 0):
             raise RuntimeError(f"yt-dlp download failed with code {result_code}")
 
@@ -96,6 +101,7 @@ class VideoDownloadEngine:
 
         output = max(candidates, key=lambda path: path.stat().st_size)
         probe = self.ffmpeg.probe(output)
+
         return DownloadResult(
             job_id=job_id,
             file_path=output,

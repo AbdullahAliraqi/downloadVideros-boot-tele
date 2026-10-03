@@ -1,84 +1,29 @@
 services:
-  telegram-bot-api:
-    image: aiogram/telegram-bot-api:latest
-    container_name: telegram-video-bot-api
-    restart: unless-stopped
-    environment:
-      TELEGRAM_API_ID: ${TELEGRAM_API_ID:?Set TELEGRAM_API_ID in .env}
-      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:?Set TELEGRAM_API_HASH in .env}
-      TELEGRAM_LOCAL: "1"
-      TELEGRAM_STAT: "1"
-      TELEGRAM_HTTP_PORT: "8081"
-    volumes:
-      - telegram_bot_api_data:/var/lib/telegram-bot-api
-    expose:
-      - "8081"
-      - "8082"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8082 >/dev/null 2>&1 || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-      start_period: 5s
-
-  youtube-companion:
-    image: quay.io/invidious/invidious-companion:latest
-    container_name: telegram-video-youtube-companion
-    restart: unless-stopped
-    environment:
-      HOST: "0.0.0.0"
-      PORT: "8282"
-      SERVER_BASE_PATH: /companion
-      SERVER_SECRET_KEY: ${YOUTUBE_COMPANION_SECRET_KEY:?Set YOUTUBE_COMPANION_SECRET_KEY (exactly 16 chars) in .env}
-      SERVER_VERIFY_REQUESTS: "false"
-      CACHE_ENABLED: "true"
-      CACHE_DIRECTORY: /var/tmp/youtubei.js
-      JOBS_YOUTUBE_SESSION_PO_TOKEN_ENABLED: "true"
-      JOBS_YOUTUBE_SESSION_FREQUENCY: "*/5 * * * *"
-      NETWORKING_FETCH_TIMEOUT_MS: "30000"
-      NETWORKING_FETCH_RETRY_ENABLED: "true"
-      NETWORKING_FETCH_RETRY_TIMES: "2"
-      NETWORKING_FETCH_RETRY_INITIAL_DEBOUNCE: "500"
-      NETWORKING_FETCH_RETRY_DEBOUNCE_MULTIPLIER: "2"
-      PROXY: ${YOUTUBE_PROXY_URL:-}
-      NETWORKING_IPV6_BLOCK: ${YOUTUBE_IPV6_BLOCK:-}
-    volumes:
-      - youtube_companion_cache:/var/tmp/youtubei.js
-    expose:
-      - "8282"
-
   bot:
     build:
       context: .
       dockerfile: Dockerfile
-    image: telegram-video-bot-bot:latest
+    image: telegram-video-bot:latest
     container_name: telegram-video-bot
     restart: unless-stopped
-    depends_on:
-      telegram-bot-api:
-        condition: service_healthy
     environment:
-      BLITZ_SINGLE_CONTAINER: "false"
       BOT_TOKEN: ${BOT_TOKEN:?Set BOT_TOKEN in .env}
-      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
       WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL:-}
-      TELEGRAM_API_BASE_URL: http://telegram-bot-api:8081
-      TELEGRAM_LOCAL_MODE: "true"
-      TELEGRAM_MAX_UPLOAD_MB: "2000"
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      TELEGRAM_MAX_UPLOAD_MB: "50"
       FFMPEG_PATH: ffmpeg
       FFPROBE_PATH: ffprobe
       DOWNLOAD_ROOT: /data/downloads
       YTDLP_PROXY_URL: ${YTDLP_PROXY_URL:-}
       YOUTUBE_PROXY_URL: ${YOUTUBE_PROXY_URL:-}
-      YTDLP_COOKIES_FILE: ${YTDLP_COOKIES_FILE:-}
-      YOUTUBE_COMPANION_BASE_URL: http://youtube-companion:8282/companion
-      YOUTUBE_COMPANION_SECRET_KEY: ${YOUTUBE_COMPANION_SECRET_KEY:?Set YOUTUBE_COMPANION_SECRET_KEY (exactly 16 chars) in .env}
+      YOUTUBE_IPV6_BLOCK: ${YOUTUBE_IPV6_BLOCK:-}
+      YTDLP_COOKIES_FILE: /run/secrets/cookies.txt
+      TELEGRAM_RUNTIME_AUTOSTART: "true"
     volumes:
       - telegram_bot_downloads:/data/downloads
       - ${YTDLP_COOKIES_DIR:-./.secrets}:/run/secrets:ro
-    command: ["python", "-m", "app.local_runner"]
+    ports:
+      - "8000:8000"
 
 volumes:
-  telegram_bot_api_data:
   telegram_bot_downloads:
-  youtube_companion_cache:
