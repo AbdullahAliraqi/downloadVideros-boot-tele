@@ -49,6 +49,11 @@ fi
 
 export YOUTUBE_COMPANION_SECRET_KEY="$secret"
 
+if [ "${BLITZ_PREFLIGHT_ONLY:-false}" = "true" ]; then
+  log "Blitz preflight complete: Telegram mode and Companion secret are valid."
+  exit 0
+fi
+
 telegram-bot-api \
   --dir=/data/telegram-bot-api \
   --temp-dir=/tmp/telegram-bot-api \
