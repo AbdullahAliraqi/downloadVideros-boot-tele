@@ -5,8 +5,10 @@ from typing import Any
 from urllib.parse import urlparse
 
 import yt_dlp
+from yt_dlp.utils import DownloadError
 
-from .config import settings, valid_cookiefile
+from .config import settings
+from .ydl_config import YOUTUBE_FALLBACK_PROFILES, build_ydl_opts
 
 MAX_VIDEO_SIZE_MB = 50
 MAX_PLANNING_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024
@@ -46,6 +48,8 @@ class DownloadPlan:
     exact_size_known: bool
     source_has_target_resolution: bool
     requires_size_reduction: bool
+    youtube_clients: tuple[str, ...] = ()
+    youtube_use_cookies: bool = True
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -79,50 +83,79 @@ def _is_youtube(url: str) -> bool:
     return host == "youtube.com" or host.endswith(".youtube.com") or host == "youtu.be"
 
 
-def _yt_dlp_options() -> dict[str, Any]:
-    options: dict[str, Any] = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "noplaylist": True,
-    }
-    cookiefile = valid_cookiefile(settings.ytdlp_cookies_file)
-    if cookiefile:
-        options["cookiefile"] = cookiefile
-    return options
-
-
 class VideoMetadataAnalyzer:
-    """Extract source metadata and available 1080p/720p/480p resolutions."""
+    """Extract source metadata with lightweight YouTube client fallbacks."""
 
     def __init__(self, *, ydl_opts: dict[str, Any] | None = None) -> None:
-        self._ydl_opts = _yt_dlp_options()
+        self._ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "noplaylist": True,
+        }
         if ydl_opts:
             self._ydl_opts.update(ydl_opts)
 
-    def analyze(self, url: str) -> dict[str, Any]:
+    def _extract(self, url: str, *, youtube_clients: tuple[str, ...], use_cookies: bool) -> dict[str, Any]:
         options = dict(self._ydl_opts)
-        proxy = settings.youtube_proxy_url if _is_youtube(url) else settings.ytdlp_proxy_url
-        if proxy:
-            options["proxy"] = proxy
-
-        with yt_dlp.YoutubeDL(options) as ydl:
-            info = ydl.extract_info(url, download=False)
-
-        formats = [_parse_format(item) for item in (info.get("formats") or [])]
-        available = tuple(
-            target
-            for target in TARGET_RESOLUTIONS
-            if any(item.has_video and item.quality_level == target for item in formats)
+        options.update(
+            build_ydl_opts(
+                url,
+                skip_download=True,
+                youtube_clients=youtube_clients,
+                use_cookies=use_cookies,
+            )
         )
-        return {
-            "id": info.get("id"),
-            "title": info.get("title"),
-            "duration": info.get("duration"),
-            "webpage_url": info.get("webpage_url") or url,
-            "formats": formats,
-            "available_resolutions": available,
-        }
+        with yt_dlp.YoutubeDL(options) as ydl:
+            return ydl.extract_info(url, download=False)
+
+    def analyze(self, url: str) -> dict[str, Any]:
+        profiles = (
+            YOUTUBE_FALLBACK_PROFILES
+            if _is_youtube(url)
+            else ((None, (), True),)
+        )
+        last_error: Exception | None = None
+
+        for name, clients, use_cookies in profiles:
+            try:
+                info = self._extract(
+                    url,
+                    youtube_clients=clients,
+                    use_cookies=use_cookies,
+                )
+                formats = [_parse_format(item) for item in (info.get("formats") or [])]
+                available = tuple(
+                    target
+                    for target in TARGET_RESOLUTIONS
+                    if any(
+                        item.has_video and item.quality_level == target
+                        for item in formats
+                    )
+                )
+                return {
+                    "id": info.get("id"),
+                    "title": info.get("title"),
+                    "duration": info.get("duration"),
+                    "webpage_url": info.get("webpage_url") or url,
+                    "formats": formats,
+                    "available_resolutions": available,
+                    "youtube_clients": clients,
+                    "youtube_use_cookies": use_cookies,
+                    "youtube_profile": name,
+                }
+            except DownloadError as exc:
+                last_error = exc
+                if not _is_youtube(url):
+                    raise
+                logger = __import__("logging").getLogger(__name__)
+                logger.warning(
+                    "yt-dlp extraction profile %s failed: %s",
+                    name,
+                    exc,
+                )
+        assert last_error is not None
+        raise last_error
 
 
 def available_resolutions(analysis: dict[str, Any]) -> tuple[int, ...]:
@@ -262,6 +295,8 @@ def _plan_for_target(
                 requires_size_reduction=(
                     estimated_size is not None and estimated_size > max_size_bytes
                 ),
+                youtube_clients=tuple(analysis.get("youtube_clients") or ()),
+                youtube_use_cookies=bool(analysis.get("youtube_use_cookies", True)),
             )
 
     return None
