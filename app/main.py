@@ -94,7 +94,7 @@ class TelegramRuntime:
         self.thread.start()
 
     def _build_application(self) -> Application:
-        application = Application.builder().token(settings.bot_token).build()
+        application = Application.builder().token(settings.bot_token).updater(None).build()
         application.add_handler(CommandHandler("start", start_handler))
         application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler)
@@ -166,7 +166,7 @@ class TelegramRuntime:
         if update is None:
             raise ValueError("Telegram sent an invalid update")
         asyncio.run_coroutine_threadsafe(
-            self.application.process_update(update),
+            self.application.update_queue.put(update),
             self.loop,
         )
 
