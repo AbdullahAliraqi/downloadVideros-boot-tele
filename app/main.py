@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Flask, request
-from telegram import Update
+from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -38,6 +38,11 @@ START_MENU = [
     ["🏠 Start", "🎬 تنزيل فيديو"],
     ["🌐 المنصات المدعومة", "ℹ️ طريقة الاستخدام"],
 ]
+START_MARKUP = ReplyKeyboardMarkup(
+    START_MENU,
+    resize_keyboard=True,
+    is_persistent=True,
+)
 
 SUPPORTED_PLATFORMS_TEXT = (
     "🌐 المنصات المدعومة:\n"
@@ -68,7 +73,7 @@ START_TEXT = (
 
 class TelegramRuntime:
     def __init__(self) -> None:
-        self.application: Application[Any, Any, Any, Any, Any, Any] | None = None
+        self.application: Application | None = None
         self.loop: asyncio.AbstractEventLoop | None = None
         self.thread: threading.Thread | None = None
         self.ready = threading.Event()
@@ -88,7 +93,7 @@ class TelegramRuntime:
         )
         self.thread.start()
 
-    def _build_application(self) -> Application[Any, Any, Any, Any, Any, Any]:
+    def _build_application(self) -> Application:
         application = Application.builder().token(settings.bot_token).build()
         application.add_handler(CommandHandler("start", start_handler))
         application.add_handler(
@@ -279,11 +284,7 @@ async def start_handler(
         return
     await update.effective_message.reply_text(
         START_TEXT,
-        reply_markup={
-            "keyboard": START_MENU,
-            "resize_keyboard": True,
-            "is_persistent": True,
-        },
+        reply_markup=START_MARKUP,
     )
 
 
@@ -305,11 +306,7 @@ async def message_handler(
     if text == "🌐 المنصات المدعومة":
         await message.reply_text(
             SUPPORTED_PLATFORMS_TEXT,
-            reply_markup={
-                "keyboard": START_MENU,
-                "resize_keyboard": True,
-                "is_persistent": True,
-            },
+            reply_markup=START_MARKUP,
         )
         return
 
