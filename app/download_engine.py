@@ -37,9 +37,6 @@ class VideoDownloadEngine:
     ) -> None:
         self.ffmpeg = FFmpegTools(ffmpeg_path, ffprobe_path)
 
-    @staticmethod
-    def _cookiefile() -> str | None:
-        return valid_cookiefile(settings.ytdlp_cookies_file)
 
     def download(
         self,
