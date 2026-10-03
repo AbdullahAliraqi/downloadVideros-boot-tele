@@ -21,7 +21,7 @@ def _int_env(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer") from exc
 
 
-@dataclass(frozen=True)
+@dataclass
 class Settings:
     bot_token: str
     telegram_max_upload_mb: int
