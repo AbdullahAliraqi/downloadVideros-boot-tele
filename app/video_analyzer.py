@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import yt_dlp
 
-from .config import settings
+from .config import settings, valid_cookiefile
 
 MAX_VIDEO_SIZE_MB = 50
 MAX_PLANNING_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024
@@ -86,12 +86,9 @@ def _yt_dlp_options() -> dict[str, Any]:
         "skip_download": True,
         "noplaylist": True,
     }
-    cookiefile = settings.ytdlp_cookies_file
+    cookiefile = valid_cookiefile(settings.ytdlp_cookies_file)
     if cookiefile:
-        from pathlib import Path
-        path = Path(cookiefile)
-        if path.is_file() and path.stat().st_size > 0:
-            options["cookiefile"] = str(path)
+        options["cookiefile"] = cookiefile
     return options
 
 
