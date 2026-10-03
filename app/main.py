@@ -21,6 +21,7 @@ from telegram.ext import (
 
 from .config import settings
 from .download_coordinator import DownloadOutcome, VideoDownloadCoordinator
+from .download_engine import DownloadTooLargeError
 from .url_validator import is_supported_url
 from .video_service import format_duration, format_size
 
@@ -208,14 +209,25 @@ def _submit_download(
 async def _send_failure_message(chat_id: int, exc: Exception) -> None:
     if runtime.application is None:
         return
-    await runtime.application.bot.send_message(
-        chat_id=chat_id,
-        text=(
+
+    if isinstance(exc, DownloadTooLargeError):
+        text = (
+            "❌ الفيديو تجاوز حد Telegram البالغ "
+            f"{settings.telegram_max_upload_mb} MB حتى عند أقل جودة مدعومة."
+        )
+    elif "automated/bot request" in str(exc):
+        text = (
+            "❌ YouTube رفض طلب التنزيل من عنوان الخادم. "
+            "تمت تجربة مسارات yt-dlp الخفيفة المتاحة، ولا يمكن للبوت تجاوز قرار YouTube من هذا الخادم."
+        )
+    else:
+        text = (
             "❌ فشلت عملية تنزيل أو معالجة الفيديو. "
             "راجع سجل الخادم لمعرفة السبب.\n"
             f"🔧 DEBUG: {type(exc).__name__}: {exc}"
-        ),
-    )
+        )
+
+    await runtime.application.bot.send_message(chat_id=chat_id, text=text)
 
 
 async def _send_download_result(
