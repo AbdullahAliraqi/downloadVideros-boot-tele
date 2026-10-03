@@ -37,8 +37,8 @@ def fmt(
     }
 
 
-def test_limit_is_2000_mb():
-    assert MAX_PLANNING_SIZE_BYTES == 2000 * 1024 * 1024
+def test_limit_is_50_mb():
+    assert MAX_PLANNING_SIZE_BYTES == 50 * 1024 * 1024
 
 
 def test_prefers_highest_supported_1080_even_when_estimate_exceeds_2000_mb():
@@ -172,7 +172,6 @@ def test_analyzer_calls_yt_dlp_with_download_disabled():
         opts = ydl_cls.call_args.args[0]
         assert opts["skip_download"] is True
         assert opts["noplaylist"] is True
-        assert opts["js_runtimes"] == {"node": {}}
         ydl.extract_info.assert_called_once_with("https://example.com/video", download=False)
         assert result["id"] == "abc"
         assert result["available_resolutions"] == ()
@@ -225,7 +224,7 @@ def test_analyzer_prefers_youtube_specific_proxy():
         assert opts["proxy"] == "socks5://youtube-proxy"
 
 
-def test_analyzer_uses_yt_dlp_default_youtube_clients():
+def test_analyzer_does_not_use_companion_or_browser_runtime():
     fake_info = {
         "id": "abc",
         "title": "Example",
@@ -242,7 +241,8 @@ def test_analyzer_uses_yt_dlp_default_youtube_clients():
         VideoMetadataAnalyzer().analyze("https://www.youtube.com/watch?v=abc")
 
         opts = ydl_cls.call_args.args[0]
-        assert "youtube" not in opts["extractor_args"]
+        assert "extractor_args" not in opts
+        assert "js_runtimes" not in opts
         assert "impersonate" not in opts
 
 
