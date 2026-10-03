@@ -16,7 +16,7 @@ RUN git clone --depth 1 --recursive https://github.com/tdlib/telegram-bot-api.gi
     && cmake -S telegram-bot-api -B telegram-bot-api/build \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/opt/telegram-bot-api \
-    && cmake --build telegram-bot-api/build --target install -j2 \
+    && cmake --build telegram-bot-api/build --target install -j"$(nproc)" \
     && strip /opt/telegram-bot-api/bin/telegram-bot-api
 
 FROM quay.io/invidious/invidious-companion:latest AS youtube-companion
