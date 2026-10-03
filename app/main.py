@@ -1,37 +1,43 @@
 from __future__ import annotations
 
+import atexit
 import asyncio
 import logging
-import shutil
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from flask import Flask, request
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 from .config import settings
-from .download_coordinator import VideoDownloadCoordinator
-from .telegram_api import (
-    TelegramFileTooLargeError,
-    send_message,
-    send_video,
-    telegram_call,
-)
+from .download_coordinator import DownloadOutcome, VideoDownloadCoordinator
 from .url_validator import is_supported_url
 from .video_service import format_duration, format_size
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
 logger = logging.getLogger(__name__)
-app = FastAPI(title="Telegram Video Downloader")
-coordinator = VideoDownloadCoordinator()
 
-START_MENU: dict[str, Any] = {
-    "keyboard": [
-        [{"text": "🏠 Start"}, {"text": "🎬 تنزيل فيديو"}],
-        [{"text": "🌐 المنصات المدعومة"}, {"text": "ℹ️ طريقة الاستخدام"}],
-    ],
-    "resize_keyboard": True,
-    "is_persistent": True,
-}
+app = Flask(__name__)
+coordinator = VideoDownloadCoordinator()
+DOWNLOAD_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="download")
+
+START_MENU = [
+    ["🏠 Start", "🎬 تنزيل فيديو"],
+    ["🌐 المنصات المدعومة", "ℹ️ طريقة الاستخدام"],
+]
 
 SUPPORTED_PLATFORMS_TEXT = (
     "🌐 المنصات المدعومة:\n"
@@ -50,7 +56,7 @@ HELP_TEXT = (
     "3. أفحص 1080p ثم 720p ثم 480p حسب ما يوفره المصدر.\n"
     "4. أبدأ بأعلى جودة متاحة فعلياً.\n"
     "5. بعد التنزيل أفحص الحجم الحقيقي للملف.\n"
-    "6. إذا تجاوز 2000 MB، أخفض الجودة تلقائياً إلى الجودة الأدنى المتاحة."
+    f"6. إذا تجاوز {settings.telegram_max_upload_mb} MB، أخفض الجودة تلقائياً إلى الجودة الأدنى المتاحة."
 )
 
 START_TEXT = (
@@ -59,126 +65,126 @@ START_TEXT = (
     "أرسل رابط الفيديو أو استخدم القائمة بالأسفل."
 )
 
-BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
+
+class TelegramRuntime:
+    def __init__(self) -> None:
+        self.application: Application[Any, Any, Any, Any, Any, Any] | None = None
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self.thread: threading.Thread | None = None
+        self.ready = threading.Event()
+        self.start_error: Exception | None = None
+
+    def start(self) -> None:
+        if not settings.bot_token:
+            logger.warning("BOT_TOKEN is not configured; Telegram runtime is disabled")
+            return
+        if self.thread and self.thread.is_alive():
+            return
+
+        self.thread = threading.Thread(
+            target=self._run,
+            name="telegram-runtime",
+            daemon=True,
+        )
+        self.thread.start()
+
+    def _build_application(self) -> Application[Any, Any, Any, Any, Any, Any]:
+        application = Application.builder().token(settings.bot_token).build()
+        application.add_handler(CommandHandler("start", start_handler))
+        application.add_handler(
+            MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler)
+        )
+        return application
+
+    async def _bootstrap(self) -> None:
+        assert self.application is not None
+        await self.application.initialize()
+        await self.application.start()
+
+        if settings.webhook_base_url:
+            webhook_url = (
+                settings.webhook_base_url.rstrip("/") + "/webhook"
+            )
+            kwargs: dict[str, Any] = {
+                "url": webhook_url,
+                "allowed_updates": ["message"],
+                "drop_pending_updates": False,
+            }
+            if settings.webhook_secret:
+                kwargs["secret_token"] = settings.webhook_secret
+            await self.application.bot.set_webhook(**kwargs)
+            logger.info("Telegram webhook configured: %s", webhook_url)
+        else:
+            logger.warning(
+                "WEBHOOK_BASE_URL is not configured; set it to the public Blitz HTTPS URL"
+            )
+
+        self.ready.set()
+        logger.info("Telegram webhook runtime ready")
+
+    def _run(self) -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        self.loop = loop
+        self.application = self._build_application()
+
+        try:
+            loop.run_until_complete(self._bootstrap())
+        except Exception as exc:
+            self.start_error = exc
+            logger.exception("Telegram runtime startup failed")
+            self.ready.set()
+
+        try:
+            loop.run_forever()
+        finally:
+            if self.application is not None:
+                try:
+                    loop.run_until_complete(self.application.stop())
+                except Exception:
+                    logger.exception("Telegram application stop failed")
+                try:
+                    loop.run_until_complete(self.application.shutdown())
+                except Exception:
+                    logger.exception("Telegram application shutdown failed")
+            loop.close()
+
+    def submit_update(self, payload: dict[str, Any]) -> None:
+        if not self.ready.wait(timeout=5):
+            raise RuntimeError("Telegram runtime is not ready")
+        if self.start_error is not None:
+            raise RuntimeError("Telegram runtime failed during startup") from self.start_error
+        if self.loop is None or self.application is None:
+            raise RuntimeError("Telegram runtime is unavailable")
+
+        update = Update.de_json(payload, self.application.bot)
+        if update is None:
+            raise ValueError("Telegram sent an invalid update")
+        asyncio.run_coroutine_threadsafe(
+            self.application.process_update(update),
+            self.loop,
+        )
+
+    def stop(self) -> None:
+        if self.loop is not None and self.loop.is_running():
+            self.loop.call_soon_threadsafe(self.loop.stop)
 
 
-def _background_task_done(task: asyncio.Task[None]) -> None:
-    BACKGROUND_TASKS.discard(task)
-    if task.cancelled():
-        return
-    try:
-        task.result()
-    except Exception:
-        logger.exception("Background video task failed")
+runtime = TelegramRuntime()
 
 
-def _spawn_background_task(coro: Any) -> asyncio.Task[None]:
-    task = asyncio.create_task(coro)
-    BACKGROUND_TASKS.add(task)
-    task.add_done_callback(_background_task_done)
-    return task
-
-
-async def send_start_menu(chat_id: int | str) -> None:
-    await send_message(chat_id, START_TEXT, reply_markup=START_MENU)
-
-
-async def configure_telegram_for_web() -> None:
-    if not settings.bot_token:
-        logger.warning("BOT_TOKEN is not configured; Telegram startup configuration skipped")
-        return
-
-    await telegram_call(
-        "setMyCommands",
-        {
-            "commands": [
-                {
-                    "command": "start",
-                    "description": "بدء البوت",
-                },
-            ]
-        },
-    )
-    logger.info("Bot commands configured")
-
-    if settings.webhook_base_url:
-        webhook_url = settings.webhook_base_url.rstrip("/") + "/webhook"
-        payload: dict[str, Any] = {
-            "url": webhook_url,
-            "allowed_updates": ["message"],
-            "drop_pending_updates": False,
-        }
-        if settings.webhook_secret:
-            payload["secret_token"] = settings.webhook_secret
-
-        await telegram_call("setWebhook", payload)
-        logger.info("Telegram webhook configured: %s", webhook_url)
-
-
-@app.on_event("startup")
-async def startup() -> None:
-    try:
-        await configure_telegram_for_web()
-    except Exception:
-        logger.exception("Telegram startup configuration failed")
-
-
-async def process_download_and_send(
-    chat_id: int | str,
+def _submit_download(
+    chat_id: int,
     url: str,
     job_id: str,
 ) -> None:
-    job_dir = Path(settings.download_root) / job_id
     try:
-        await send_message(chat_id, "⬇️ بدأت عملية التنزيل والمعالجة...")
-        outcome = await asyncio.to_thread(
-            coordinator.download,
-            url,
-            job_id=job_id,
-        )
-        result = outcome.result
-
-        available = ", ".join(
-            f"{height}p" for height in outcome.available_heights
-        )
-        await send_message(
-            chat_id,
-            f"🔎 الجودات المتاحة للمصدر: {available}",
-        )
-
-        if outcome.fallback_count:
-            attempted = " → ".join(
-                f"{height}p" for height in outcome.attempted_heights
-            )
-            await send_message(
-                chat_id,
-                "ℹ️ تم خفض الجودة تلقائياً بسبب تجاوز 2000 MB: "
-                f"{attempted}\n"
-                f"📦 الحجم النهائي: {format_size(result.actual_size)}",
-            )
-
-        caption = (
-            f"🎬 {result.file_path.stem}\n"
-            f"🎞 الجودة: {result.target_height}p\n"
-            f"⏱ المدة: {format_duration(result.probe.duration_seconds)}\n"
-            f"📦 الحجم: {format_size(result.actual_size)}"
-        )
-        await send_video(chat_id, result.file_path, caption=caption)
-        await send_message(chat_id, "✅ تم إرسال الفيديو بنجاح.")
-
-    except TelegramFileTooLargeError as exc:
-        logger.warning(
-            "Telegram upload limit exceeded: file=%s size_bytes=%d "
-            "limit_bytes=%d local_mode=%s",
-            exc.file_path,
-            exc.size_bytes,
-            exc.limit_bytes,
-            settings.telegram_local_mode,
-        )
-        limit_mb = settings.telegram_max_upload_mb
-        await send_message(
-            chat_id,
-            f"❌ الفيديو ما زال يتجاوز {limit_mb} MB حتى بعد الوصول إلى أقل جودة مدعومة.",
+        outcome = coordinator.download(url, job_id=job_id)
+        if runtime.loop is None or runtime.application is None:
+            raise RuntimeError("Telegram runtime is unavailable for result delivery")
+        asyncio.run_coroutine_threadsafe(
+            _send_download_result(chat_id, outcome),
+            runtime.loop,
         )
     except Exception as exc:
         logger.exception(
@@ -187,139 +193,202 @@ async def process_download_and_send(
             url,
             job_id,
         )
-        await send_message(
-            chat_id,
-            "❌ فشلت عملية تنزيل أو معالجة الفيديو. راجع سجل الخادم لمعرفة السبب.",
-        )
-        await send_message(
-            chat_id,
-            f"🔧 DEBUG: {type(exc).__name__}: {exc}",
-        )
-    finally:
-        if job_dir.exists():
-            await asyncio.to_thread(
-                shutil.rmtree,
-                job_dir,
-                ignore_errors=True,
+        if runtime.loop is not None and runtime.application is not None:
+            asyncio.run_coroutine_threadsafe(
+                _send_failure_message(chat_id, exc),
+                runtime.loop,
             )
 
 
-async def handle_update(update: dict[str, object]) -> None:
-    message = update.get("message") or {}
-    if not isinstance(message, dict):
+async def _send_failure_message(chat_id: int, exc: Exception) -> None:
+    if runtime.application is None:
+        return
+    await runtime.application.bot.send_message(
+        chat_id=chat_id,
+        text=(
+            "❌ فشلت عملية تنزيل أو معالجة الفيديو. "
+            "راجع سجل الخادم لمعرفة السبب.\n"
+            f"🔧 DEBUG: {type(exc).__name__}: {exc}"
+        ),
+    )
+
+
+async def _send_download_result(
+    chat_id: int,
+    outcome: DownloadOutcome,
+) -> None:
+    if runtime.application is None:
         return
 
-    chat = message.get("chat") or {}
-    if not isinstance(chat, dict):
+    bot = runtime.application.bot
+    result = outcome.result
+    limit_bytes = settings.telegram_max_upload_mb * 1024 * 1024
+
+    available = ", ".join(f"{height}p" for height in outcome.available_heights)
+    await bot.send_message(
+        chat_id=chat_id,
+        text=f"🔎 الجودات المتاحة للمصدر: {available}",
+    )
+
+    if result.actual_size > limit_bytes:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"❌ الفيديو ما زال يتجاوز {settings.telegram_max_upload_mb} MB "
+                "بعد الوصول إلى أقل جودة مدعومة، لذلك لن يتم إرساله."
+            ),
+        )
         return
 
-    text = str(message.get("text") or "").strip()
-    chat_id = chat.get("id")
+    if outcome.fallback_count:
+        attempted = " → ".join(f"{height}p" for height in outcome.attempted_heights)
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                "ℹ️ تم خفض الجودة تلقائياً بسبب تجاوز حد الرفع: "
+                f"{attempted}\n"
+                f"📦 الحجم النهائي: {format_size(result.actual_size)}"
+            ),
+        )
 
-    if not chat_id or not text:
+    caption = (
+        f"🎬 {result.file_path.stem}\n"
+        f"🎞 الجودة: {result.target_height}p\n"
+        f"⏱ المدة: {format_duration(result.probe.duration_seconds)}\n"
+        f"📦 الحجم: {format_size(result.actual_size)}"
+    )
+    with result.file_path.open("rb") as video_file:
+        await bot.send_video(
+            chat_id=chat_id,
+            video=video_file,
+            caption=caption,
+        )
+    await bot.send_message(chat_id=chat_id, text="✅ تم إرسال الفيديو بنجاح.")
+
+    job_dir = Path(settings.download_root) / result.job_id
+    if job_dir.exists():
+        import shutil
+        shutil.rmtree(job_dir, ignore_errors=True)
+
+
+async def start_handler(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    if update.effective_chat is None or update.effective_message is None:
+        return
+    await update.effective_message.reply_text(
+        START_TEXT,
+        reply_markup={
+            "keyboard": START_MENU,
+            "resize_keyboard": True,
+            "is_persistent": True,
+        },
+    )
+
+
+async def message_handler(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    message = update.effective_message
+    chat = update.effective_chat
+    if message is None or chat is None or not message.text:
         return
 
-    if text in {"/start", "🏠 Start"}:
-        await send_start_menu(chat_id)
+    text = message.text.strip()
+
+    if text == "🏠 Start":
+        await start_handler(update, context)
         return
 
     if text == "🌐 المنصات المدعومة":
-        await send_message(
-            chat_id,
+        await message.reply_text(
             SUPPORTED_PLATFORMS_TEXT,
-            reply_markup=START_MENU,
+            reply_markup={
+                "keyboard": START_MENU,
+                "resize_keyboard": True,
+                "is_persistent": True,
+            },
         )
         return
 
     if text == "ℹ️ طريقة الاستخدام":
-        await send_message(
-            chat_id,
+        await message.reply_text(
             HELP_TEXT,
-            reply_markup=START_MENU,
+            reply_markup={
+                "keyboard": START_MENU,
+                "resize_keyboard": True,
+                "is_persistent": True,
+            },
         )
         return
 
     if text == "🎬 تنزيل فيديو":
-        await send_message(
-            chat_id,
+        await message.reply_text(
             "🎬 أرسل رابط الفيديو الآن.",
-            reply_markup=START_MENU,
+            reply_markup={
+                "keyboard": START_MENU,
+                "resize_keyboard": True,
+                "is_persistent": True,
+            },
         )
         return
 
     if not is_supported_url(text):
-        await send_message(
-            chat_id,
+        await message.reply_text(
             "❌ أرسل رابطاً من YouTube أو Facebook أو Instagram أو TikTok أو X أو Reddit.",
-            reply_markup=START_MENU,
+            reply_markup={
+                "keyboard": START_MENU,
+                "resize_keyboard": True,
+                "is_persistent": True,
+            },
         )
         return
 
     logger.info(
         "Accepted video URL: chat_id=%s url=%s",
-        chat_id,
+        chat.id,
         text,
     )
-    await send_message(
-        chat_id,
-        "🔎 أفحص الجودات المتاحة قبل بدء التنزيل...",
-    )
+    await message.reply_text("🔎 أفحص الجودات المتاحة قبل بدء التنزيل...")
     job_id = uuid.uuid4().hex
-    _spawn_background_task(
-        process_download_and_send(chat_id, text, job_id)
-    )
+    DOWNLOAD_EXECUTOR.submit(_submit_download, chat.id, text, job_id)
 
 
 @app.get("/")
-async def root() -> dict[str, str]:
-    return {"service": "telegram-video-downloader", "status": "ok"}
+def root() -> tuple[str, int]:
+    return "Bot Service is Active", 200
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
-
-
-@app.get("/telegram-diagnostic")
-async def telegram_diagnostic() -> dict[str, Any]:
-    """Temporary deployment diagnostic; never returns credentials."""
-    try:
-        me = await telegram_call("getMe", {})
-        webhook = await telegram_call("getWebhookInfo", {})
-        me_result = me.get("result") or {}
-        webhook_result = webhook.get("result") or {}
-        return {
-            "telegram_ok": bool(me.get("ok")),
-            "bot_id": me_result.get("id"),
-            "bot_username": me_result.get("username"),
-            "webhook_url": webhook_result.get("url") or "",
-            "pending_updates": webhook_result.get("pending_update_count", 0),
-            "last_error_message": webhook_result.get("last_error_message"),
-            "last_error_date": webhook_result.get("last_error_date"),
-        }
-    except Exception as exc:
-        logger.exception("Telegram diagnostic failed")
-        return {
-            "telegram_ok": False,
-            "error_type": type(exc).__name__,
-            "error": str(exc),
-        }
+def health() -> tuple[dict[str, str], int]:
+    return {"status": "ok"}, 200
 
 
 @app.post("/webhook")
-async def telegram_webhook(
-    request: Request,
-    x_telegram_bot_api_secret_token: str | None = Header(default=None),
-) -> dict[str, bool]:
+def webhook() -> tuple[str, int]:
     if (
         settings.webhook_secret
-        and x_telegram_bot_api_secret_token != settings.webhook_secret
+        and request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+        != settings.webhook_secret
     ):
-        raise HTTPException(status_code=403, detail="Invalid webhook secret")
+        return "Forbidden", 403
 
-    update = await request.json()
-    if not isinstance(update, dict):
-        return {"ok": True}
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return "Invalid Telegram update", 400
 
-    _spawn_background_task(handle_update(update))
-    return {"ok": True}
+    try:
+        runtime.submit_update(payload)
+    except Exception:
+        logger.exception("Failed to queue Telegram update")
+        return "Telegram runtime unavailable", 503
+
+    return "OK", 200
+
+
+if settings.telegram_runtime_autostart:
+    runtime.start()
+
+atexit.register(runtime.stop)
