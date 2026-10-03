@@ -55,3 +55,25 @@ settings = Settings(
     host=os.getenv("HOST", "0.0.0.0").strip() or "0.0.0.0",
     port=_int_env("PORT", 8000),
 )
+
+
+def valid_cookiefile(path: str) -> str | None:
+    """Return a cookie file only when it is a readable Mozilla/Netscape jar."""
+    from http.cookiejar import MozillaCookieJar
+    from pathlib import Path
+
+    cookie_path = Path(path)
+    if not cookie_path.is_file() or cookie_path.stat().st_size == 0:
+        return None
+
+    try:
+        jar = MozillaCookieJar(str(cookie_path))
+        jar.load(ignore_discard=True, ignore_expires=True)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Ignoring invalid yt-dlp cookie file: %s", cookie_path
+        )
+        return None
+
+    return str(cookie_path)

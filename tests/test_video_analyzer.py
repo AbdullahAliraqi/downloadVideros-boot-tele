@@ -256,3 +256,51 @@ def test_analyzer_does_not_use_companion_or_browser_runtime():
 def test_raises_when_no_480_or_better_format_exists(bad_formats):
     with pytest.raises(ValueError):
         build_download_plan({"duration": 60, "formats": bad_formats})
+
+
+def test_analyzer_ignores_invalid_cookie_file(tmp_path):
+    from app.video_analyzer import VideoMetadataAnalyzer
+
+    cookiefile = tmp_path / "invalid-cookies.txt"
+    cookiefile.write_text("not-a-cookie-jar\n")
+
+    fake_info = {
+        "id": "abc",
+        "title": "Example",
+        "duration": 12,
+        "formats": [],
+    }
+
+    with patch.object(settings, "ytdlp_cookies_file", str(cookiefile)), \
+         patch("app.video_analyzer.yt_dlp.YoutubeDL") as ydl_cls:
+        ydl = ydl_cls.return_value.__enter__.return_value
+        ydl.extract_info.return_value = fake_info
+
+        VideoMetadataAnalyzer().analyze("https://www.youtube.com/watch?v=abc")
+
+        opts = ydl_cls.call_args.args[0]
+        assert "cookiefile" not in opts
+
+
+def test_analyzer_accepts_netscape_cookie_header(tmp_path):
+    from app.video_analyzer import VideoMetadataAnalyzer
+
+    cookiefile = tmp_path / "cookies.txt"
+    cookiefile.write_text("# Netscape HTTP Cookie File\n")
+
+    fake_info = {
+        "id": "abc",
+        "title": "Example",
+        "duration": 12,
+        "formats": [],
+    }
+
+    with patch.object(settings, "ytdlp_cookies_file", str(cookiefile)), \
+         patch("app.video_analyzer.yt_dlp.YoutubeDL") as ydl_cls:
+        ydl = ydl_cls.return_value.__enter__.return_value
+        ydl.extract_info.return_value = fake_info
+
+        VideoMetadataAnalyzer().analyze("https://www.youtube.com/watch?v=abc")
+
+        opts = ydl_cls.call_args.args[0]
+        assert opts["cookiefile"] == str(cookiefile)
