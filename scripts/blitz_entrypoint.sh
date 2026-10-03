@@ -62,9 +62,7 @@ telegram-bot-api \
   --http-port=8081 \
   --http-stat-port=8082 \
   --http-ip-address=127.0.0.1 \
-  --local \
-  --username="$(id -un)" \
-  --groupname="$(id -gn)" &
+  --local &
 telegram_pid=$!
 
 HOST=127.0.0.1 \
