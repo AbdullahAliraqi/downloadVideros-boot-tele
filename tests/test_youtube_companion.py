@@ -232,3 +232,11 @@ def test_invalid_companion_secret_is_rejected():
     )
     with pytest.raises(Exception, match="exactly 16 characters"):
         gateway.resolve("https://www.youtube.com/watch?v=abc123")
+
+
+def test_companion_normalizes_render_hostport():
+    gateway = YouTubeCompanionGateway(
+        base_url="youtube-companion-ab12:8282",
+        secret_key="A1b2C3d4E5f6G7h8",
+    )
+    assert gateway.base_url == "http://youtube-companion-ab12:8282/companion"
