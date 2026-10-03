@@ -4,10 +4,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import yt_dlp
+from yt_dlp.utils import DownloadError
 
-from .config import settings, valid_cookiefile
+from .config import settings
 from .media_tools import FFmpegTools, MediaProbeResult
 from .video_analyzer import DownloadPlan
+from .ydl_config import TELEGRAM_MAX_FILESIZE, build_ydl_opts
 
 
 @dataclass(frozen=True)
@@ -20,6 +22,10 @@ class DownloadResult:
     actual_size: int
     exceeds_planning_limit: bool
     probe: MediaProbeResult
+
+
+class DownloadTooLargeError(RuntimeError):
+    """Raised when yt-dlp refuses a source because of the Telegram size guard."""
 
 
 class VideoDownloadEngine:
@@ -51,33 +57,43 @@ class VideoDownloadEngine:
             shutil.rmtree(job_dir)
         job_dir.mkdir(parents=True, exist_ok=True)
 
-        options = {
-            "format": plan.format_selector,
-            "outtmpl": str(job_dir / "%(id)s.%(ext)s"),
-            "merge_output_format": "mp4",
-            "ffmpeg_location": settings.ffmpeg_path,
-            "quiet": True,
-            "no_warnings": True,
-            "noplaylist": True,
-            "overwrites": True,
-        }
+        clients = plan.youtube_clients or None
+        use_cookies = plan.youtube_use_cookies
+        options = build_ydl_opts(
+            url,
+            output_template=str(job_dir / "%(id)s.%(ext)s"),
+            format_selector=plan.format_selector,
+            youtube_clients=clients,
+            use_cookies=use_cookies,
+        )
+        options.update(
+            {
+                "merge_output_format": "mp4",
+                "ffmpeg_location": settings.ffmpeg_path,
+                "max_filesize": TELEGRAM_MAX_FILESIZE,
+            }
+        )
 
-        cookiefile = self._cookiefile()
-        if cookiefile:
-            options["cookiefile"] = cookiefile
-
-        if settings.youtube_proxy_url:
-            from .url_validator import platform_for_url
-            if platform_for_url(url) == "YouTube":
-                options["proxy"] = settings.youtube_proxy_url
-        elif settings.ytdlp_proxy_url:
-            options["proxy"] = settings.ytdlp_proxy_url
-
-        with yt_dlp.YoutubeDL(options) as ydl:
-            result_code = ydl.download([url])
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                result_code = ydl.download([url])
+        except DownloadError as exc:
+            message = str(exc)
+            lowered = message.lower()
+            if "max filesize" in lowered or "larger than the max" in lowered:
+                raise DownloadTooLargeError(
+                    f"Source/output exceeded the Telegram 50 MB guard: {message}"
+                ) from exc
+            if "sign in to confirm" in lowered or "not a bot" in lowered:
+                raise RuntimeError(
+                    "YouTube rejected the request as an automated/bot request "
+                    "even with the configured lightweight client fallback."
+                ) from exc
+            raise RuntimeError(f"yt-dlp download failed: {message}") from exc
 
         if result_code not in (None, 0):
             raise RuntimeError(f"yt-dlp download failed with code {result_code}")
+
 
         candidates = [
             path
