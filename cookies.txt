@@ -1,2 +1,2 @@
-# Optional Netscape-format cookies for yt-dlp.
-# Keep real authentication cookies out of Git history.
+# Netscape HTTP Cookie File
+# This placeholder contains no authentication cookies.
