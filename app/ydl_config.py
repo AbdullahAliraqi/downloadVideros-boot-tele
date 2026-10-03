@@ -19,8 +19,9 @@ BASE_HTTP_HEADERS = {
 }
 
 YOUTUBE_FALLBACK_PROFILES = (
-    ("web", ("web",), True),
-    ("android_vr", ("android_vr",), False),
+    ("default", (), True),
+    ("tv", ("tv",), True),
+    ("tv_embedded", ("tv_embedded",), True),
     ("web_embedded", ("web_embedded",), True),
 )
 
@@ -76,7 +77,6 @@ def build_ydl_opts(
         "noplaylist": True,
         "overwrites": True,
         "http_headers": headers,
-        "max_filesize": TELEGRAM_MAX_FILESIZE,
         "retries": 3,
         "fragment_retries": 3,
         "socket_timeout": 30,
@@ -94,12 +94,15 @@ def build_ydl_opts(
         options["format"] = format_selector
 
     if platform == "YouTube":
-        clients = youtube_clients or ("web", "android_vr")
-        options["extractor_args"] = {
-            "youtube": {
-                "player_client": list(clients),
+        # Let yt-dlp choose its current default client first. Explicitly forcing
+        # web/android clients can reduce format availability or trigger stricter
+        # bot/PO-token requirements on datacenter IPs.
+        if youtube_clients:
+            options["extractor_args"] = {
+                "youtube": {
+                    "player_client": list(youtube_clients),
+                }
             }
-        }
 
         cookiefile = valid_cookiefile(settings.ytdlp_cookies_file)
         if use_cookies and cookiefile:

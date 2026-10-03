@@ -9,7 +9,7 @@ from yt_dlp.utils import DownloadError
 from .config import settings
 from .media_tools import FFmpegTools, MediaProbeResult
 from .video_analyzer import DownloadPlan
-from .ydl_config import TELEGRAM_MAX_FILESIZE, build_ydl_opts
+from .ydl_config import build_ydl_opts
 
 
 @dataclass(frozen=True)
@@ -67,7 +67,6 @@ class VideoDownloadEngine:
             {
                 "merge_output_format": "mp4",
                 "ffmpeg_location": settings.ffmpeg_path,
-                "max_filesize": TELEGRAM_MAX_FILESIZE,
             }
         )
 
