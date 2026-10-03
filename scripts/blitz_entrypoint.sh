@@ -19,6 +19,7 @@ if [ -n "${TELEGRAM_API_ID:-}" ] && [ -n "${TELEGRAM_API_HASH:-}" ]; then
   export TELEGRAM_LOCAL_MODE=true
   export TELEGRAM_MAX_UPLOAD_MB=2000
   export TELEGRAM_API_BASE_URL=http://127.0.0.1:8081
+  required_ports="8081 8282"
   log "Telegram Local Bot API enabled."
 else
   export TELEGRAM_LOCAL_MODE=false
@@ -88,7 +89,10 @@ node /opt/bgutil-ytdlp-pot-provider/server/build/main.js --port 4416 &
 pot_pid=$!
 
 cleanup() {
-  kill "$pot_pid" "$companion_pid" "$telegram_pid" 2>/dev/null || true
+  kill "$pot_pid" "$companion_pid" 2>/dev/null || true
+  if [ -n "${telegram_pid:-}" ]; then
+    kill "$telegram_pid" 2>/dev/null || true
+  fi
 }
 trap cleanup INT TERM EXIT
 
@@ -96,7 +100,7 @@ python - <<'PY'
 import socket
 import time
 
-services = (("127.0.0.1", 8081), ("127.0.0.1", 8282))
+services = tuple(("127.0.0.1", int(port)) for port in "${required_ports}".split())
 deadline = time.time() + 60
 while time.time() < deadline:
     ready = True
