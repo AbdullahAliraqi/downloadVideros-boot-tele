@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yt_dlp
 
-from .config import settings
+from .config import settings, valid_cookiefile
 from .media_tools import FFmpegTools, MediaProbeResult
 from .video_analyzer import DownloadPlan
 
@@ -33,10 +33,7 @@ class VideoDownloadEngine:
 
     @staticmethod
     def _cookiefile() -> str | None:
-        path = Path(settings.ytdlp_cookies_file)
-        if path.is_file() and path.stat().st_size > 0:
-            return str(path)
-        return None
+        return valid_cookiefile(settings.ytdlp_cookies_file)
 
     def download(
         self,
