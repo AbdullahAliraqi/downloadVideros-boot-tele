@@ -10,83 +10,72 @@ Portrait video quality is classified by the shorter video dimension, so 1080x192
 
 ## Production architecture
 
-The production deployment is Docker Compose on the VPS with three cooperating services:
+The primary production target is a single self-contained Docker application on blitz.cloud. The image keeps the public FastAPI service on port 8000 and runs the Local Telegram Bot API, Invidious Companion, and bgutil POT server on loopback inside the same container.
 
 ```text
 Telegram
    ↓
-bot
-   ├── YouTube → youtube-companion → YouTube
+Blitz public HTTPS → FastAPI bot
+   ├── YouTube → local Companion → YouTube
    ├── Reddit  → Reddit resolver/downloader
    └── other supported platforms → native yt-dlp
    ↓
 FFprobe / actual-size gate
    ↓
-telegram-bot-api (Local Bot API)
+local Telegram Bot API
    ↓
 Telegram
 ```
 
-The Local Telegram Bot API is the upload path for the 2000 MB target.
+This single-container layout avoids relying on container-to-container networking for the Blitz deployment.
 
-### YouTube production path
+## Blitz deployment
 
-YouTube no longer depends on public Piped instances.
+Blitz builds this repository from GitHub when the project is connected and runs the repository Dockerfile. It expects one HTTP service/port, so the Dockerfile starts all internal services on loopback and exposes only port 8000.
 
-The primary YouTube path is the official Invidious Companion project, an internal service specifically designed to handle YouTube stream retrieval and attestation through youtubei.js. It exposes an internal player API and a refreshed `latest_version` stream path. The bot only uses Companion as a YouTube acquisition layer; resolution policy, file-size policy, FFmpeg probing, and Telegram delivery remain in this project.
+Set these environment variables in the Blitz app:
 
-The bot falls back to native yt-dlp once if Companion is unavailable or YouTube rejects the Companion path. A configuration error in the internal Companion key is not silently hidden by the fallback. Native yt-dlp can optionally use a Netscape-format YouTube cookies file and the same configured egress proxy.
+- `BOT_TOKEN`
+- `TELEGRAM_API_ID`
+- `TELEGRAM_API_HASH`
+- `WEBHOOK_BASE_URL` to the public Blitz app URL when using webhooks
+- `WEBHOOK_SECRET` when desired
+- `YOUTUBE_PROXY_URL` when YouTube blocks the hosting egress IP
+- `YOUTUBE_IPV6_BLOCK` when using a routable IPv6 block
 
-The Companion service generates PO tokens automatically. It keeps its youtube.js cache in a persistent Docker volume and refreshes its YouTube session periodically.
+`YOUTUBE_COMPANION_SECRET_KEY` is optional in Blitz. When omitted, the entrypoint generates a random 16-character value and stores it in the persistent `/data/youtube-companion` folder.
 
-### YouTube configuration
+Do not set `TELEGRAM_API_BASE_URL` to `https://api.telegram.org` for the Blitz production image; the image provides the Local Bot API internally.
 
-Set `YOUTUBE_COMPANION_SECRET_KEY` to a random value of exactly 16 characters in the VPS `.env`. It is used only for the internal bot → Companion API.
+Blitz applies environment-variable changes on the next restart. Persistent folders survive restarts when they are among the app's kept folders. Configure the detected `/data/*` folders in Advanced settings when needed. citeturn886786search1
 
-For native fallback cookies:
+## YouTube
 
-1. Create a `.secrets` directory beside `docker-compose.yml`.
-2. Put `youtube-cookies.txt` inside it.
-3. Set `YTDLP_COOKIES_FILE=/run/secrets/youtube-cookies.txt`.
-4. Keep the cookie file out of Git.
+YouTube uses the official Invidious Companion project as the primary acquisition gateway. The Companion secret is internal only. Native yt-dlp remains a one-time fallback and can optionally use a Netscape-format cookies file.
 
-yt-dlp requires Mozilla/Netscape cookie format for a manual cookie file. Its current FAQ also recommends refreshing the browser session and notes that cookies are sensitive credentials. Use a dedicated account rather than a primary account when account cookies are necessary.
+A successful `/health` response is not a YouTube success signal. The real gate is:
 
-For the current YouTube bot-check problem, the decisive deployment dependency is the outbound network identity. Invidious documents that YouTube may block datacenter/VPN IPs and recommends changing the public IP, configuring a proxy in Companion, or using IPv6 rotation; it explicitly does not guarantee that these measures will restore access. Set `YOUTUBE_PROXY_URL` to a stable proxy when the VPS public IP is blocked. `YOUTUBE_IPV6_BLOCK` is an alternative when the VPS has a routable IPv6 range. Do not rotate a proxy identity per request.
+1. Companion starts.
+2. Companion obtains a usable YouTube session / PO token.
+3. The player endpoint resolves a public YouTube video.
+4. The bot selects the highest source-supported resolution.
+5. FFprobe validates the resulting MP4.
+6. The actual file size stays within the 2000 MB planning limit or the documented quality fallback occurs.
+7. The Local Telegram Bot API sends the file.
 
-`YTDLP_PROXY_URL` remains the generic native yt-dlp proxy. For YouTube, `YOUTUBE_PROXY_URL` takes precedence.
+The Telegram Local Bot API binary is taken from the official aiogram container and listens only on loopback inside the Blitz container. The official image documents local mode and port 8081. citeturn725909search0turn725909search1
 
-## Local / VPS deployment
+## Local Docker Compose
 
-1. Copy `.env.example` to `.env`.
-2. Set `BOT_TOKEN`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, and a 16-character `YOUTUBE_COMPANION_SECRET_KEY`. For the observed YouTube bot-check on datacenter IPs, also configure `YOUTUBE_PROXY_URL` or a valid `YOUTUBE_IPV6_BLOCK`.
-3. Run:
+The repository also keeps a conventional three-service `docker-compose.yml` for a normal VPS/Docker host. In that mode, the entrypoint is disabled for the bot container and the three services communicate over the Compose network.
 
 ```bash
 docker compose up -d --build
 docker compose ps
 ```
 
-The bot service uses `app.local_runner`, removes any webhook, and polls the Local Telegram Bot API. The Compose deployment must be used as a multi-service project; deploying the root Dockerfile alone does not start the Local Telegram Bot API or YouTube Companion services.
-
-For the 2000 MB target, do not replace `TELEGRAM_API_BASE_URL=http://telegram-bot-api:8081` with the cloud Bot API URL.
-
-## Verification
-
-A successful `/health` or `200 OK` webhook response is not a YouTube success signal.
-
-For a real production gate, verify all of the following on the deployed Compose project:
-
-- `youtube-companion` is healthy.
-- Its player endpoint resolves a public YouTube video.
-- The bot downloads the highest source-supported resolution.
-- FFprobe validates the resulting MP4.
-- A file over 2000 MB causes only the documented resolution fallback.
-- A file within the limit reaches `telegram-bot-api` and is sent.
-- Restarting the Compose project preserves the Companion cache volume and does not require rebuilding for ordinary session refreshes.
-
 ## Security
 
-Real values for `BOT_TOKEN`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `WEBHOOK_SECRET`, `YOUTUBE_COMPANION_SECRET_KEY`, and YouTube cookies must stay out of Git history.
+Real values for `BOT_TOKEN`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `WEBHOOK_SECRET`, and any YouTube cookies must stay out of Git history.
 
-The Local Telegram Bot API state, downloads, and Companion cache use named Docker volumes so service restarts do not depend on bind-mounted runtime state.
+Do not commit a real `YOUTUBE_COMPANION_SECRET_KEY`. Blitz generates one automatically when it is not provided.
