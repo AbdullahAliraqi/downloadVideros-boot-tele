@@ -72,7 +72,7 @@ SERVER_BASE_PATH=/companion \
 SERVER_SECRET_KEY="$YOUTUBE_COMPANION_SECRET_KEY" \
 SERVER_VERIFY_REQUESTS=false \
 CACHE_ENABLED=true \
-CACHE_DIRECTORY=/data/youtubei.js \
+CACHE_DIRECTORY=/var/tmp/youtubei.js \
 JOBS_YOUTUBE_SESSION_PO_TOKEN_ENABLED=true \
 JOBS_YOUTUBE_SESSION_FREQUENCY='*/5 * * * *' \
 NETWORKING_FETCH_TIMEOUT_MS=30000 \
@@ -96,11 +96,12 @@ cleanup() {
 }
 trap cleanup INT TERM EXIT
 
-python - <<'PY'
+REQUIRED_PORTS="$required_ports" python - <<'PY'
+import os
 import socket
 import time
 
-services = tuple(("127.0.0.1", int(port)) for port in "${required_ports}".split())
+services = tuple(("127.0.0.1", int(port)) for port in os.environ["REQUIRED_PORTS"].split())
 deadline = time.time() + 60
 while time.time() < deadline:
     ready = True
